@@ -828,7 +828,7 @@ long msm_vfe47_reset_hardware(struct vfe_device *vfe_dev,
 
 	if (blocking_call) {
 		rc = wait_for_completion_interruptible_timeout(
-			&vfe_dev->reset_complete, msecs_to_jiffies(100));
+			&vfe_dev->reset_complete, msecs_to_jiffies(500));
 		if (rc <= 0) {
 			pr_err("%s:%d failed: reset timeout\n", __func__,
 				__LINE__);
@@ -2057,7 +2057,7 @@ int msm_vfe47_axi_halt(struct vfe_device *vfe_dev,
 		/* Halt AXI Bus Bridge */
 		msm_camera_io_w_mb(0x1, vfe_dev->vfe_base + 0x400);
 		rc = wait_for_completion_interruptible_timeout(
-			&vfe_dev->halt_complete, msecs_to_jiffies(500));
+			&vfe_dev->halt_complete, msecs_to_jiffies(600));
 		if (rc <= 0)
 			pr_err("%s:VFE%d halt timeout rc=%d\n", __func__,
 				vfe_dev->pdev->id, rc);
@@ -2375,13 +2375,13 @@ void msm_vfe47_stats_cfg_ub(struct vfe_device *vfe_dev)
 	int i;
 	uint32_t ub_offset = 0;
 	uint32_t ub_size[VFE47_NUM_STATS_TYPE] = {
-		16, /* MSM_ISP_STATS_HDR_BE */
-		16, /* MSM_ISP_STATS_BG */
+		32, /* MSM_ISP_STATS_HDR_BE */
+		32, /* MSM_ISP_STATS_BG */
 		16, /* MSM_ISP_STATS_BF */
 		16, /* MSM_ISP_STATS_HDR_BHIST */
 		16, /* MSM_ISP_STATS_RS */
-		16, /* MSM_ISP_STATS_CS */
-		16, /* MSM_ISP_STATS_IHIST */
+		0, /* MSM_ISP_STATS_CS */
+		0, /* MSM_ISP_STATS_IHIST */
 		16, /* MSM_ISP_STATS_BHIST */
 		16, /* MSM_ISP_STATS_AEC_BG */
 	};
@@ -2393,6 +2393,9 @@ void msm_vfe47_stats_cfg_ub(struct vfe_device *vfe_dev)
 		pr_err("%s: incorrect VFE device\n", __func__);
 
 	for (i = 0; i < VFE47_NUM_STATS_TYPE; i++) {
+		/* CS and IHIST have no UB allocation. */
+		if (!ub_size[i])
+			continue;
 		ub_offset -= ub_size[i];
 		msm_camera_io_w(VFE47_STATS_BURST_LEN << 30 |
 			ub_offset << 16 | (ub_size[i] - 1),

@@ -1975,7 +1975,7 @@ struct img_plane_info {
 
 #define QCAMERA_NAME "qcamera"
 #define QCAMERA_SERVER_NAME "qcamera_server"
-#define QCAMERA_VNODE_GROUP_ID MEDIA_ENT_F_IO_V4L
+#define QCAMERA_VNODE_GROUP_ID 2
 
 enum msm_cam_subdev_type {
 	CSIPHY_DEV,

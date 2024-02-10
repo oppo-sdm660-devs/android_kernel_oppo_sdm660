@@ -39,6 +39,12 @@
 #define DEFINE_MSM_MUTEX(mutexname) \
 	static struct mutex mutexname = __MUTEX_INITIALIZER(mutexname)
 
+/*Added by Jinshui.Liu@Camera 20160821 for [module vendor info]*/
+struct int_string_pair {
+	uint16_t value;
+	char string[20];
+};
+
 enum msm_sensor_sensor_slave_info_type {
 	MSM_SENSOR_SLAVEADDR_DATA,
 	MSM_SENSOR_IDREGADDR_DATA,
@@ -91,6 +97,10 @@ struct msm_sensor_ctrl_t {
 	uint8_t is_csid_tg_mode;
 	uint32_t is_secure;
 	uint8_t bypass_video_node_creation;
+	/*add by hongbo.dai@Camera 20180118,add for support ES1 and ES2*/
+	uint16_t chip_id;
+	/*add by hongbo.dai@Camera 20180209,add for get chip version*/
+	uint16_t chip_version;
 };
 
 int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void *argp);

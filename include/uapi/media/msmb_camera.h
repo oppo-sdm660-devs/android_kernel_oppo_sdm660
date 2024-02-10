@@ -64,7 +64,8 @@
  * can have max of 9 groups of 8 bufs each. This value may be
  * configured in future
  */
-#define MSM_CAMERA_MAX_STREAM_BUF 72
+/*modify by hongbo.dai@camera, for support 240fps video record*/
+#define MSM_CAMERA_MAX_STREAM_BUF (72 + 24)
 
 /* Max batch size of processing */
 #define MSM_CAMERA_MAX_USER_BUFF_CNT 16
