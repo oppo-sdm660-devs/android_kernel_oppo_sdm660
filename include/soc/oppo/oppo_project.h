@@ -105,6 +105,7 @@ unsigned char get_Operator_Version(void);
 #else
 unsigned int init_project_version(void) { return 0;}
 unsigned int get_project(void) { return 0;}
+unsigned int get_real_project(void) { return 0;}
 unsigned int is_project(OPPO_PROJECT project) { return 0;}
 unsigned char get_PCB_Version(void) { return 0;}
 unsigned char get_Modem_Version(void) { return 0;}

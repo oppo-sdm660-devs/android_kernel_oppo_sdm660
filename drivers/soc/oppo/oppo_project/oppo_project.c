@@ -32,6 +32,47 @@ unsigned int get_project(void)
         return format->nproject;
 }
 
+unsigned int get_real_project(void)
+{
+        if (format == NULL) {
+                init_project_version();
+        }
+
+        if (format->nproject == 16051) {
+                if (format->noperator == 2) {        // OPPO R11t
+                        return 16052;
+                } else if (format->noperator == 8) { // OPPO R11
+                        return 16051;
+                }
+        } else if (format->nproject == 16103) {
+                if (format->noperator == 2) {        // OPPO R11 Plust
+                        return 16102;
+                } else if (format->noperator == 8) { // OPPO R11 Plus
+                        return 16103;
+                }
+        } else if (format->nproject == 16118) {
+                if (format->noperator == 2) {        // OPPO R11 Pluskt
+                        return 16116;
+                } else if (format->noperator == 8) { // OPPO R11 Plusk
+                        return 16118;
+                }
+        } else if (format->nproject == 17011) {
+                if (format->noperator == 2) {        // OPPO R11st
+                        return 17013;
+                } else if (format->noperator == 8) { // OPPO R11s
+                        return 17011;
+                }
+        } else if (format->nproject == 17021) {
+                if (format->noperator == 2) {        // OPPO R11s Plust
+                        return 17023;
+                } else if (format->noperator == 8) { // OPPO R11s Plus
+                        return 17021;
+                }
+        }
+
+        return 0;                                    // Unknown
+}
+
 unsigned int is_project(OPPO_PROJECT project)
 {
         return (get_project() == project?1:0);
@@ -99,6 +140,30 @@ struct file_operations prjVersion_proc_fops = {
         .write = NULL,
 };
 
+
+static ssize_t real_prjVersion_read_proc(struct file *file, char __user *buf,
+                size_t count, loff_t *off)
+{
+        char page[256] = {0};
+        int len = 0;
+        len = sprintf(page, "%d", get_real_project());
+
+        if (len > *off) {
+                len -= *off;
+        }
+        else
+                len = 0;
+        if (copy_to_user(buf, page, (len < count ? len : count))) {
+                return -EFAULT;
+        }
+        *off += len < count ? len : count;
+        return (len < count ? len : count);
+}
+
+struct file_operations real_prjVersion_proc_fops = {
+        .read = real_prjVersion_read_proc,
+        .write = NULL,
+};
 
 static ssize_t pcbVersion_read_proc(struct file *file, char __user *buf,
                 size_t count, loff_t *off)
@@ -414,6 +479,11 @@ static int __init oppo_project_init(void)
         pentry = proc_create("prjVersion", S_IRUGO, oppoVersion, &prjVersion_proc_fops);
         if (!pentry) {
                 pr_err("create prjVersion proc failed.\n");
+                goto ERROR_INIT_VERSION;
+        }
+        pentry = proc_create("real_prjVersion", S_IRUGO, oppoVersion, &real_prjVersion_proc_fops);
+        if (!pentry) {
+                pr_err("create real_prjVersion proc failed.\n");
                 goto ERROR_INIT_VERSION;
         }
         pentry = proc_create("pcbVersion", S_IRUGO, oppoVersion, &pcbVersion_proc_fops);
