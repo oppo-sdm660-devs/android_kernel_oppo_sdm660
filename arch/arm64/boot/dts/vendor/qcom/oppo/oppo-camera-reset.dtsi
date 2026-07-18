@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+/delete-node/ &led_flash0;
+/delete-node/ &led_flash1;
+/delete-node/ &cam_avdd_gpio_regulator;
+/delete-node/ &cam_actuator_regulator;
+/delete-node/ &cam_dvdd_gpio_regulator;
+/delete-node/ &cam_rear_dvdd_gpio_regulator;
+
+/delete-node/ &actuator0;
+/delete-node/ &actuator1;
+/delete-node/ &actuator2;
+/delete-node/ &ois0;
+/delete-node/ &tof0;
+/delete-node/ &eeprom0;
+/delete-node/ &eeprom1;
+/delete-node/ &eeprom2;
+
+&soc {
+	qcom,csiphy@c824000 {
+		qcom,clock-rates = <0 0 0 0 0 0 384000000 0 0 269333333 0
+			0 384000000 0 0>;
+	};
+
+	qcom,csiphy@c825000 {
+		qcom,clock-rates = <0 0 0 0 0 0 384000000 0 0 269333333 0
+			0 384000000 0 0>;
+	};
+
+	qcom,csiphy@c826000 {
+		qcom,clock-rates = <0 0 0 0 0 0 384000000 0 0 269333333 0
+			0 384000000 0 0>;
+	};
+
+	qcom,csid@ca30000 {
+		qcom,clock-rates = <0 0 0 0 0 0 0 384000000 384000000
+			0 0 0 0 0>;
+	};
+
+	qcom,csid@ca30400 {
+		qcom,clock-rates = <0 0 0 0 0 0 0 256000000 256000000
+			0 0 0 0 0>;
+	};
+
+	qcom,csid@ca30800 {
+		qcom,clock-rates = <0 0 0 0 0 0 0 256000000 256000000
+			0 0 0 0 0>;
+	};
+
+	qcom,csid@ca30c00 {
+		qcom,clock-rates = <0 0 0 0 0 0 0 256000000 256000000
+			0 0 0 0 0>;
+	};
+};
+
+&cci {
+	status = "okay";
+
+	/delete-node/ qcom,camera@0;
+	/delete-node/ qcom,camera@1;
+	/delete-node/ qcom,camera@2;
+	/delete-node/ qcom,camera@3;
+};
+
+&pm660l_gpios {
+	oppo_cam_gpio3 {
+		oppo_cam_gpio3_default: oppo_cam_gpio3_default {
+			pins = "gpio3";
+			function = "normal";
+			power-source = <0>;
+			drive-push-pull;
+			output-low;
+			bias-disable;
+		};
+	};
+
+	oppo_cam_gpio4 {
+		oppo_cam_gpio4_default: oppo_cam_gpio4_default {
+			pins = "gpio4";
+			function = "normal";
+			power-source = <0>;
+			drive-push-pull;
+			output-low;
+			bias-disable;
+		};
+	};
+};

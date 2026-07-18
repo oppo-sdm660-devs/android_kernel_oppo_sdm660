@@ -195,7 +195,16 @@ Optional properties:
 					"bl_ctrl_wled" = Backlight controlled by WLED.
 					"bl_ctrl_dcs" = Backlight controlled by DCS commands.
 					"bl_ctrl_tlmm_gpio" = Backlight controlled by TLMM GPIO.
+					"bl_ctrl_external" = Backlight controlled by the device
+					referenced by the backlight property.
 					other: Unknown backlight control. (default)
+- backlight:                            Phandle of the external backlight class device.
+                                          Required when the backlight control type is
+                                          "bl_ctrl_external".
+- qcom,mdss-dsi-bl-dcs-16bit:          Boolean to send DCS brightness command 0x51 as
+                                          a 16-bit value, most significant byte first.
+                                          Valid when the backlight control type is
+                                          "bl_ctrl_dcs".
 - qcom,mdss-dsi-bl-pwm-pmi:		Boolean to indicate that PWM control is through second pmic chip.
 - qcom,mdss-dsi-bl-pmic-bank-select:	LPG channel for backlight.
 					Required if blpmiccontroltype is PWM

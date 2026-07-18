@@ -1,0 +1,187 @@
+// SPDX-License-Identifier: GPL-2.0
+
+#include "../dsi-panel-oppo17011samsung_sofeg01_1080p_cmd-16051-16103-16118.dtsi"
+#include "../dsi-panel-oppo17021samsung_sofeg01_1080p_cmd-16051-16103-16118.dtsi"
+#include "oppo-sdm660-common.dtsi"
+
+&int_codec {
+	oppo,speaker-pa = "maxim";
+};
+
+&mdss_dsi0 {
+	pinctrl-0 = <&mdss_dsi_active &mdss_te_active
+			&mdss_exits_active &mdss_err_active>;
+	pinctrl-1 = <&mdss_dsi_suspend &mdss_te_suspend
+			&mdss_exits_suspend &mdss_err_suspend>;
+};
+
+&dsi_rm67195_amoled_fhd_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_labibb_amoled>;
+};
+
+&dsi_oppo16051samsung_s6e3fa3_1080p_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_labibb_amoled>;
+};
+
+&dsi_oppo17011samsung_sofeg01_s_1080p_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_labibb_amoled>;
+};
+
+&pm660a_oledb {
+	status = "disabled";
+};
+
+&pm660a_labibb {
+	status = "disabled";
+};
+
+&i2c_6 {
+	status = "okay";
+
+	ak4376@10 {
+		compatible = "akm,ak4376";
+		reg = <0x10>;
+		ak4376,reset-gpio = <&tlmm 76 0x00>;
+		ak4376-tvdd-supply = <&pm660_l14>;
+		ak4376-avdd-supply = <&pm660_l14>;
+		ak4376-tvdd-L8-supply = <&pm660_l8>;
+		ak4376-avdd-L8-supply = <&pm660_l8>;
+		status = "okay";
+	};
+
+	max989xx@3a {
+		compatible = "maxim,max98927L";
+		reg = <0x3a>;
+		mono_stereo_mode = <0>;
+		interleave_mode = <0>;
+		maxim,98927-reset-gpio = <&tlmm 80 0x00>;
+		max989xx_vdd-supply = <&pm660_l13>;
+		status = "okay";
+	};
+};
+
+&cam_sensor_rear_active {
+	mux { pins = "gpio48", "gpio50"; };
+	config { pins = "gpio48", "gpio50"; };
+};
+
+&cam_sensor_rear_suspend {
+	mux { pins = "gpio48", "gpio50"; };
+	config { pins = "gpio48", "gpio50"; };
+};
+
+&cam_sensor_rear2_active {
+	mux { pins = "gpio46", "gpio35"; };
+	config { pins = "gpio46", "gpio35"; };
+};
+
+&cam_sensor_rear2_suspend {
+	mux { pins = "gpio46", "gpio35"; };
+	config { pins = "gpio46", "gpio35"; };
+};
+
+&cam_sensor_front_active {
+	mux { pins = "gpio47", "gpio64", "gpio35"; };
+	config { pins = "gpio47", "gpio64", "gpio35"; };
+};
+
+&cam_sensor_front_suspend {
+	mux { pins = "gpio47", "gpio64", "gpio35"; };
+	config { pins = "gpio47", "gpio64", "gpio35"; };
+};
+
+&pm660l_flash0 {
+	qcom,current-ma = <750>;
+};
+
+&pm660l_flash1 {
+	qcom,current-ma = <750>;
+};
+
+&pm660l_torch0 {
+	qcom,current-ma = <108>;
+};
+
+&pm660l_torch1 {
+	qcom,current-ma = <108>;
+};
+
+&dsi_oppo16051samsung_s6e3fa3_1080p_cmd {
+	qcom,mdss-dsi-panel-timings-phy-v2 = [
+		24 1f 08 09 05 03 04 a0
+		24 1f 08 09 05 03 04 a0
+		24 1f 08 09 05 03 04 a0
+		24 1f 08 09 05 03 04 a0
+		24 1a 08 09 05 03 04 a0];
+};
+
+&dsi_oppo16103jdi_r63452_1080p_cmd {
+	qcom,mdss-dsi-panel-timings-phy-v2 = [
+		24 1f 08 09 05 03 04 a0
+		24 1f 08 09 05 03 04 a0
+		24 1f 08 09 05 03 04 a0
+		24 1f 08 09 05 03 04 a0
+		24 1b 08 09 05 03 04 a0];
+};
+
+&dsi_oppo16118samsung_s6e3fa3_1080p_cmd {
+	qcom,mdss-dsi-panel-timings-phy-v2 = [
+		24 1f 08 09 06 03 04 a0
+		24 1f 08 09 06 03 04 a0
+		24 1f 08 09 06 03 04 a0
+		24 1f 08 09 06 03 04 a0
+		24 1b 08 09 06 03 04 a0];
+};
+
+&dsi_oppo17011samsung_sofeg01_s_1080p_cmd {
+	qcom,mdss-dsi-panel-timings-phy-v2 = [
+		24 1f 08 09 05 03 04 a0
+		24 1f 08 09 05 03 04 a0
+		24 1f 08 09 05 03 04 a0
+		24 1f 08 09 05 03 04 a0
+		24 1b 08 09 05 03 04 a0];
+};
+
+&i2c_1 {
+	status = "okay";
+	synaptics16118@20 {
+		compatible = "synaptics-s3508";
+		reg = <0x20>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <67 0x2008>;
+
+		vdd_2v8-supply = <&touchpanel_vdd>;
+		vcc_1v8-supply = <&pm660_l14>;
+
+		irq-gpio = <&tlmm 67 0x2008>;
+		reset-gpio = <&tlmm 66 0x1>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_int_active &ts_reset_active>;
+
+		touchpanel,max-num-support = <10>;
+		touchpanel,tx-rx-num = <18 31>;
+		touchpanel,panel-coords = <1080 1920>;
+		touchpanel,display-coords = <1080 1920>;
+
+		black_gesture_support;
+		edge_limit_support;
+		spurious_fingerprint_support;
+		smart_gesture_support;
+
+		touchpanel,button-type = <2 0x05>;
+		touchpanel.button-TRx = <1 2>;
+	};
+};
+
+&soc {
+	devinfo {
+		compatible = "oppo-devinfo";
+		Hw,sub_hwid_1 = <&tlmm 30 0x00>;
+		pinctrl-names = "default", "hw_sub_gpio_sleep";
+		pinctrl-0 = <&hw_sub_gpio_active>;
+		pinctrl-1 = <&hw_sub_gpio_sleep>;
+	};
+};
+
+#include "oppo-camera-161xx.dtsi"

@@ -1,3 +1,12 @@
+ifeq ($(CONFIG_MACH_OPPO_SDM660),y)
+        dtb-$(CONFIG_MACH_OPPO_R11) += \
+                sdm660-pm660a-mtp-16051.dtb \
+                sdm660-pm660a-mtp-16103.dtb \
+                sdm660-pm660a-mtp-16118.dtb
+        dtb-$(CONFIG_MACH_OPPO_R11S) += \
+                sdm660-pm660a-mtp-17011.dtb \
+                sdm660-pm660a-mtp-17021.dtb
+else # CONFIG_MACH_OPPO_SDM660
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
         dtbo-$(CONFIG_ARCH_KONA) += \
                 kona-cdp-overlay.dtbo \
@@ -450,6 +459,7 @@ sdm630-mtp.dtb \
         sda630-pm660a-rcm.dtb \
         sda630-pm660a-qrd-hdk.dtb
 endif
+endif # CONFIG_MACH_OPPO_SDM660
 
 always		:= $(dtb-y)
 subdir-y	:= $(dts-dirs)
