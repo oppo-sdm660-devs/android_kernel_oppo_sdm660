@@ -1,0 +1,29 @@
+config MACH_OPPO
+	bool "OPPO device"
+	depends on ARCH_QCOM
+	help
+	  Support for OPPO products
+
+config MACH_OPPO_SDM660
+	bool "OPPO SDM660"
+	depends on ARCH_SDM660
+	select MACH_OPPO
+	help
+	  Support for OPPO SDM660 devices
+
+menu "OPPO board selection"
+	depends on ARCH_SDM660
+
+	config MACH_OPPO_R11
+		bool "OPPO 16051 board"
+		select MACH_OPPO_SDM660
+		help
+		  Support for OPPO R11, OPPO R11 Plus, OPPO R11 Plusk
+
+	config MACH_OPPO_R11S
+		bool "OPPO 17011 board"
+		select MACH_OPPO_SDM660
+		help
+		  Support for OPPO R11s, OPPO R11s Plus
+
+endmenu
