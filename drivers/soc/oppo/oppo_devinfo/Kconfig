@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0
+config OPPO_DEVICE_INFO
+	bool "OPPO device information"
+	depends on OPPO_COMMON_SOFT
+	depends on OF && GPIOLIB && PINCTRL
+	help
+	  Expose board and device information in /proc/devinfo.

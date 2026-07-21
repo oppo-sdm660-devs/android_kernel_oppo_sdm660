@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0
+config OPPO_COMMON_SOFT
+	bool "OPPO project information"
+	depends on ARCH_SDM660
+	depends on QCOM_SMEM=y
+	depends on PROC_FS && SYSFS
+	select OPPO_ARCH_FILE
+	help
+	  Read project and hardware information from Qualcomm SMEM.
