@@ -9,9 +9,7 @@
 #include <linux/irqreturn.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/gpio.h>
-#ifdef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 #include <linux/backlight.h>
-#endif
 
 #include "mdss_panel.h"
 #include "mdss_dsi_cmd.h"
@@ -93,6 +91,7 @@ enum dsi_panel_bl_ctrl {
 	BL_PWM,
 	BL_WLED,
 	BL_DCS_CMD,
+	BL_EXTERNAL,
 	UNKNOWN_CTRL,
 };
 
@@ -454,6 +453,7 @@ struct mdss_dsi_ctrl_pdata {
 	int lcd_mode_sel_gpio;
 	int bklt_ctrl;	/* backlight ctrl */
 	enum dsi_ctrl_op_mode bklt_dcs_op_mode; /* backlight dcs ctrl mode */
+	bool bklt_dcs_16bit;
 	bool pwm_pmi;
 	int pwm_period;
 	int pwm_pmic_gpio;
@@ -476,6 +476,7 @@ struct mdss_dsi_ctrl_pdata {
 #ifdef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 	struct backlight_device *raw_bd;
 #endif
+	struct backlight_device *external_bd;
 	u32 pclk_rate;
 	u32 byte_clk_rate;
 	u32 pclk_rate_bkp;
@@ -699,9 +700,7 @@ int mdss_panel_get_dst_fmt(u32 bpp, char mipi_mode, u32 pixel_packing,
 
 int mdss_dsi_register_recovery_handler(struct mdss_dsi_ctrl_pdata *ctrl,
 		struct mdss_intf_recovery *recovery);
-#ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 void mdss_dsi_unregister_bl_settings(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
-#endif
 void mdss_dsi_panel_dsc_pps_send(struct mdss_dsi_ctrl_pdata *ctrl,
 				struct mdss_panel_info *pinfo);
 void mdss_dsi_dsc_config(struct mdss_dsi_ctrl_pdata *ctrl,

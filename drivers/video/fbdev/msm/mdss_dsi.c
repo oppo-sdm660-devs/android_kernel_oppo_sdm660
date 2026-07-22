@@ -365,6 +365,15 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
+#if IS_REACHABLE(CONFIG_BACKLIGHT_CLASS_DEVICE)
+	if (ctrl_pdata->bklt_ctrl == BL_EXTERNAL) {
+		ret = backlight_disable(ctrl_pdata->external_bd);
+		if (ret)
+			pr_warn("%s: failed to disable external backlight: %d\n",
+				__func__, ret);
+	}
+#endif
+
 	ret = mdss_dsi_panel_reset(pdata, 0);
 	if (ret) {
 		pr_warn("%s: Panel reset failed. rc=%d\n", __func__, ret);
@@ -398,12 +407,36 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
+#if IS_REACHABLE(CONFIG_BACKLIGHT_CLASS_DEVICE)
+	if (ctrl_pdata->bklt_ctrl == BL_EXTERNAL &&
+	    !pdata->panel_info.cont_splash_enabled) {
+		ret = backlight_device_set_brightness(ctrl_pdata->external_bd, 0);
+		if (ret) {
+			pr_err("%s: failed to clear external backlight: %d\n",
+			       __func__, ret);
+			return ret;
+		}
+
+		ret = backlight_enable(ctrl_pdata->external_bd);
+		if (ret) {
+			pr_err("%s: failed to enable external backlight: %d\n",
+			       __func__, ret);
+			return ret;
+		}
+	}
+#endif
+
 	ret = msm_dss_enable_vreg(
 		ctrl_pdata->panel_power_data.vreg_config,
 		ctrl_pdata->panel_power_data.num_vreg, 1);
 	if (ret) {
 		pr_err("%s: failed to enable vregs for %s\n",
 			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
+#if IS_REACHABLE(CONFIG_BACKLIGHT_CLASS_DEVICE)
+		if (ctrl_pdata->bklt_ctrl == BL_EXTERNAL &&
+		    !pdata->panel_info.cont_splash_enabled)
+			backlight_disable(ctrl_pdata->external_bd);
+#endif
 		return ret;
 	}
 
@@ -3377,6 +3410,27 @@ error_link_clk_deinit:
 	return rc;
 }
 
+static void mdss_dsi_ctrl_clock_deinit(struct platform_device *ctrl_pdev,
+				       struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+	if (ctrl_pdata->mdp_clk_handle) {
+		mdss_dsi_clk_deregister(ctrl_pdata->mdp_clk_handle);
+		ctrl_pdata->mdp_clk_handle = NULL;
+	}
+
+	if (ctrl_pdata->dsi_clk_handle) {
+		mdss_dsi_clk_deregister(ctrl_pdata->dsi_clk_handle);
+		ctrl_pdata->dsi_clk_handle = NULL;
+	}
+
+	if (ctrl_pdata->clk_mngr) {
+		mdss_dsi_clk_deinit(ctrl_pdata->clk_mngr);
+		ctrl_pdata->clk_mngr = NULL;
+	}
+
+	mdss_dsi_link_clk_deinit(&ctrl_pdev->dev, ctrl_pdata);
+}
+
 static int mdss_dsi_set_clk_rates(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int rc = 0;
@@ -3592,7 +3646,8 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 	dsi_pan_node = mdss_dsi_config_panel(pdev, index);
 	if (!dsi_pan_node) {
 		pr_err("%s: panel configuration failed\n", __func__);
-		return -EINVAL;
+		rc = -EINVAL;
+		goto error_ctrl_clock_deinit;
 	}
 
 	if (!mdss_dsi_is_hw_config_split(ctrl_pdata->shared_data) ||
@@ -3600,6 +3655,9 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 		(ctrl_pdata->panel_data.panel_info.pdest == DISPLAY_1))) {
 		rc = mdss_panel_parse_bl_settings(dsi_pan_node, ctrl_pdata);
 		if (rc) {
+			if (rc == -EPROBE_DEFER ||
+			    ctrl_pdata->bklt_ctrl == BL_EXTERNAL)
+				goto error_pan_node;
 			pr_warn("%s: dsi bl settings parse failed\n", __func__);
 			/* Panels like AMOLED and dsi2hdmi chip
 			 * does not need backlight control.
@@ -3633,13 +3691,13 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 	rc = mdss_dsi_set_clk_rates(ctrl_pdata);
 	if (rc) {
 		pr_err("%s: Failed to set dsi clk rates\n", __func__);
-		return rc;
+		goto error_shadow_clk_deinit;
 	}
 
 	rc = mdss_dsi_cont_splash_config(pinfo, ctrl_pdata);
 	if (rc) {
 		pr_err("%s: Failed to set dsi splash config\n", __func__);
-		return rc;
+		goto error_shadow_clk_deinit;
 	}
 
 	if (mdss_dsi_is_te_based_esd(ctrl_pdata)) {
@@ -3710,10 +3768,10 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 error_shadow_clk_deinit:
 	mdss_dsi_shadow_clk_deinit(&pdev->dev, ctrl_pdata);
 error_pan_node:
-#ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 	mdss_dsi_unregister_bl_settings(ctrl_pdata);
-#endif
 	of_node_put(dsi_pan_node);
+error_ctrl_clock_deinit:
+	mdss_dsi_ctrl_clock_deinit(pdev, ctrl_pdata);
 	return rc;
 }
 
@@ -4165,6 +4223,7 @@ static int mdss_dsi_ctrl_remove(struct platform_device *pdev)
 	}
 
 	mdss_dsi_pm_qos_remove_request(ctrl_pdata->shared_data);
+	mdss_dsi_ctrl_clock_deinit(pdev, ctrl_pdata);
 
 	if (msm_dss_config_vreg(&pdev->dev,
 			ctrl_pdata->panel_power_data.vreg_config,
@@ -4181,6 +4240,8 @@ static int mdss_dsi_ctrl_remove(struct platform_device *pdev)
 
 	if (ctrl_pdata->workq)
 		destroy_workqueue(ctrl_pdata->workq);
+
+	mdss_dsi_unregister_bl_settings(ctrl_pdata);
 
 	return 0;
 }

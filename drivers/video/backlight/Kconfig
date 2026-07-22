@@ -407,6 +407,12 @@ config BACKLIGHT_LM3639
 	help
 	  This supports TI LM3639 Backlight + 1.5A Flash LED Driver
 
+config BACKLIGHT_LM3697
+	tristate "OPPO 16103 TI LM3697 backlight support"
+	depends on MFD_TI_LMU && BACKLIGHT_CLASS_DEVICE
+	help
+	  Say Y here to enable the TI LM3697 backlight on OPPO R11 Plus.
+
 config BACKLIGHT_LP855X
 	tristate "Backlight driver for TI LP855X"
 	depends on BACKLIGHT_CLASS_DEVICE && I2C && PWM

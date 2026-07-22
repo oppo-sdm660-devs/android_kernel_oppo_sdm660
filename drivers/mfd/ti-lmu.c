@@ -226,8 +226,8 @@ static int ti_lmu_remove(struct i2c_client *cl)
 {
 	struct ti_lmu *lmu = i2c_get_clientdata(cl);
 
-	ti_lmu_disable_hw(lmu);
 	mfd_remove_devices(lmu->dev);
+	ti_lmu_disable_hw(lmu);
 	return 0;
 }
 

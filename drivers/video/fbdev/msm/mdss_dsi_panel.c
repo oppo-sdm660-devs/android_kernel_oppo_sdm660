@@ -8,10 +8,10 @@
 #include <linux/gpio.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/backlight.h>
+#include <linux/mutex.h>
 #ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 #include <linux/leds.h>
-#else
-#include <linux/backlight.h>
 #endif
 #include <linux/pwm.h>
 #include <linux/err.h>
@@ -215,6 +215,14 @@ static struct dsi_cmd_desc backlight_cmd = {
 	led_pwm1
 };
 
+static char led_pwm2[3] = {0x51, 0x0, 0x0}; /* DTYPE_DCS_LWRITE */
+static struct dsi_cmd_desc backlight_cmd_16bit = {
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(led_pwm2)},
+	led_pwm2
+};
+
+static DEFINE_MUTEX(backlight_cmd_lock);
+
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 {
 	struct dcs_cmd_req cmdreq;
@@ -228,10 +236,18 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 
 	pr_debug("%s: level=%d\n", __func__, level);
 
-	led_pwm1[1] = (unsigned char)level;
+	mutex_lock(&backlight_cmd_lock);
+	level = clamp_t(int, level, 0, pinfo->bl_max);
+	if (ctrl->bklt_dcs_16bit) {
+		led_pwm2[1] = (level >> 8) & 0xff;
+		led_pwm2[2] = level & 0xff;
+	} else {
+		led_pwm1[1] = level;
+	}
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
-	cmdreq.cmds = &backlight_cmd;
+	cmdreq.cmds = ctrl->bklt_dcs_16bit ?
+		&backlight_cmd_16bit : &backlight_cmd;
 	cmdreq.cmds_cnt = 1;
 	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
 	cmdreq.rlen = 0;
@@ -243,6 +259,7 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 		cmdreq.flags |= CMD_REQ_LP_MODE;
 
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+	mutex_unlock(&backlight_cmd_lock);
 }
 
 static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
@@ -883,6 +900,12 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 		led_trigger_event(bl_led_trigger, bl_level);
 #else
 		backlight_device_set_brightness(ctrl_pdata->raw_bd, bl_level);
+#endif
+		break;
+	case BL_EXTERNAL:
+#if IS_REACHABLE(CONFIG_BACKLIGHT_CLASS_DEVICE)
+		backlight_device_set_brightness(ctrl_pdata->external_bd,
+						bl_level);
 #endif
 		break;
 	case BL_PWM:
@@ -2405,6 +2428,31 @@ static int dsi_panel_wled_register(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 }
 #endif
 
+static int dsi_panel_ext_bl_get(struct device_node *np,
+				struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+#if IS_REACHABLE(CONFIG_BACKLIGHT_CLASS_DEVICE)
+	struct backlight_device *bd;
+	struct device_node *backlight_node;
+
+	backlight_node = of_parse_phandle(np, "backlight", 0);
+	if (!backlight_node) {
+		pr_err("%s: backlight phandle is missing\n", __func__);
+		return -EINVAL;
+	}
+
+	bd = of_find_backlight_by_node(backlight_node);
+	of_node_put(backlight_node);
+	if (!bd)
+		return -EPROBE_DEFER;
+
+	ctrl_pdata->external_bd = bd;
+	return 0;
+#else
+	return -ENODEV;
+#endif
+}
+
 int mdss_panel_parse_bl_settings(struct device_node *np,
 			struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -2427,6 +2475,11 @@ int mdss_panel_parse_bl_settings(struct device_node *np,
 			pr_debug("%s: SUCCESS-> WLED TRIGGER register\n",
 				__func__);
 			ctrl_pdata->bklt_ctrl = BL_WLED;
+		} else if (!strcmp(data, "bl_ctrl_external")) {
+			ctrl_pdata->bklt_ctrl = BL_EXTERNAL;
+			rc = dsi_panel_ext_bl_get(np, ctrl_pdata);
+			if (rc)
+				return rc;
 		} else if (!strcmp(data, "bl_ctrl_pwm")) {
 			ctrl_pdata->bklt_ctrl = BL_PWM;
 			ctrl_pdata->pwm_pmi = of_property_read_bool(np,
@@ -2471,6 +2524,8 @@ int mdss_panel_parse_bl_settings(struct device_node *np,
 				ctrl_pdata->bklt_dcs_op_mode = DSI_HS_MODE;
 			else
 				ctrl_pdata->bklt_dcs_op_mode = DSI_LP_MODE;
+			ctrl_pdata->bklt_dcs_16bit =
+				of_property_read_bool(np, "qcom,mdss-dsi-bl-dcs-16bit");
 
 			pr_debug("%s: Configured DCS_CMD bklt ctrl\n",
 								__func__);
@@ -2524,13 +2579,20 @@ int mdss_dsi_panel_timing_switch(struct mdss_dsi_ctrl_pdata *ctrl,
 	return 0;
 }
 
-#ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 void mdss_dsi_unregister_bl_settings(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
+#ifndef CONFIG_BACKLIGHT_QCOM_SPMI_WLED
 	if (ctrl_pdata->bklt_ctrl == BL_WLED)
 		led_trigger_unregister_simple(bl_led_trigger);
-}
 #endif
+	if (ctrl_pdata->external_bd) {
+		backlight_put(ctrl_pdata->external_bd);
+		ctrl_pdata->external_bd = NULL;
+	}
+	ctrl_pdata->bklt_ctrl = UNKNOWN_CTRL;
+	ctrl_pdata->bklt_dcs_16bit = false;
+}
+
 static int mdss_dsi_panel_timing_from_dt(struct device_node *np,
 		struct dsi_panel_timing *pt,
 		struct mdss_panel_data *panel_data)
