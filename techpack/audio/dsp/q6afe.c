@@ -252,6 +252,8 @@ struct afe_ctl {
 	uint32_t cps_ch_mask;
 	struct afe_cps_hw_intf_cfg *cps_config;
 	int lsm_afe_ports[MAX_LSM_SESSIONS];
+	u8 *dsm_payload;
+	u32 dsm_payload_size;
 };
 
 struct afe_clkinfo_per_port {
@@ -711,6 +713,7 @@ static int32_t sp_make_afe_callback(uint32_t opcode, uint32_t *payload,
 	u32 *data_start = NULL;
 	size_t expected_size = sizeof(u32);
 	uint32_t num_ch = 0;
+	bool dsm_response = false;
 
 	memset(&param_hdr, 0, sizeof(param_hdr));
 
@@ -887,13 +890,26 @@ static int32_t sp_make_afe_callback(uint32_t opcode, uint32_t *payload,
 		  sizeof(struct afe_sp_v4_param_tmax_xmax_logging) +
 		  (num_ch * sizeof(struct afe_sp_v4_channel_tmax_xmax_params));
 		break;
+	case AFE_PARAM_ID_DSM_CFG:
+	case AFE_PARAM_ID_DSM_INFO:
+	case AFE_PARAM_ID_CALIB:
+		if (!this_afe.dsm_payload ||
+		    param_hdr.param_size > this_afe.dsm_payload_size) {
+			pr_err("%s: Invalid DSM response size %u, buffer size %u\n",
+			       __func__, param_hdr.param_size,
+			       this_afe.dsm_payload_size);
+			return -EINVAL;
+		}
+		expected_size += param_hdr.param_size;
+		dsm_response = true;
+		break;
 	default:
 		pr_err("%s: Unrecognized param ID %d\n", __func__,
 		       param_hdr.param_id);
 		return -EINVAL;
 	}
 
-	if (!data_dest)
+	if (!data_dest && !dsm_response)
 		return -ENOMEM;
 
 	if (payload_size < expected_size) {
@@ -904,14 +920,18 @@ static int32_t sp_make_afe_callback(uint32_t opcode, uint32_t *payload,
 		return -EINVAL;
 	}
 
-	data_dest[0] = payload[0];
-	memcpy(&data_dest[1], &param_hdr, sizeof(struct param_hdr_v3));
-	memcpy(&data_dest[5], data_start, param_hdr.param_size);
+	if (dsm_response) {
+		memcpy(this_afe.dsm_payload, data_start, param_hdr.param_size);
+	} else {
+		data_dest[0] = payload[0];
+		memcpy(&data_dest[1], &param_hdr, sizeof(struct param_hdr_v3));
+		memcpy(&data_dest[5], data_start, param_hdr.param_size);
+	}
 
-	if (!data_dest[0]) {
+	if (!payload[0]) {
 		atomic_set(&this_afe.state, 0);
 	} else {
-		pr_debug("%s: status: %d", __func__, data_dest[0]);
+		pr_debug("%s: status: %d", __func__, payload[0]);
 		atomic_set(&this_afe.state, -1);
 	}
 
@@ -2337,6 +2357,170 @@ fail_cmd:
 		 param_info.param_id, ret);
 	return ret;
 }
+
+static int afe_dsm_set_params(int port, int module_id, int param_id,
+			      u8 *payload, int size)
+{
+	struct param_hdr_v3 param_info;
+	int ret;
+
+	if (!payload || size <= 0)
+		return -EINVAL;
+
+	memset(&param_info, 0, sizeof(param_info));
+	param_info.module_id = module_id;
+	param_info.instance_id = INSTANCE_ID_0;
+	param_info.param_id = param_id;
+	param_info.param_size = size;
+
+	mutex_lock(&this_afe.afe_cmd_lock);
+	ret = q6afe_pack_and_set_param_in_band(port,
+					       q6audio_get_port_index(port),
+					       param_info, payload);
+	mutex_unlock(&this_afe.afe_cmd_lock);
+	if (ret)
+		pr_err("%s: Failed to set DSM param 0x%x, err %d\n",
+		       __func__, param_id, ret);
+
+	return ret;
+}
+
+static int afe_dsm_get_params(int port, int module_id, int param_id,
+			      u8 *payload, int size)
+{
+	struct param_hdr_v3 param_hdr;
+	int ret;
+
+	if (!payload || size <= 0)
+		return -EINVAL;
+
+	memset(&param_hdr, 0, sizeof(param_hdr));
+	param_hdr.module_id = module_id;
+	param_hdr.instance_id = INSTANCE_ID_0;
+	param_hdr.param_id = param_id;
+	param_hdr.param_size = size;
+
+	mutex_lock(&this_afe.afe_cmd_lock);
+	memset(payload, 0, size);
+	this_afe.dsm_payload = payload;
+	this_afe.dsm_payload_size = size;
+	ret = q6afe_get_params(port, NULL, &param_hdr);
+	this_afe.dsm_payload = NULL;
+	this_afe.dsm_payload_size = 0;
+	mutex_unlock(&this_afe.afe_cmd_lock);
+	if (ret)
+		pr_err("%s: Failed to get DSM param 0x%x, err %d\n",
+		       __func__, param_id, ret);
+
+	return ret;
+}
+
+int afe_dsm_rx_get_params(u8 *payload, int size)
+{
+	return afe_dsm_get_params(DSM_RX_PORT_ID, AFE_MODULE_DSM_RX,
+				  AFE_PARAM_ID_DSM_CFG, payload, size);
+}
+EXPORT_SYMBOL(afe_dsm_rx_get_params);
+
+int afe_dsm_rx_set_params(u8 *payload, int size)
+{
+	return afe_dsm_set_params(DSM_RX_PORT_ID, AFE_MODULE_DSM_RX,
+				  AFE_PARAM_ID_DSM_CFG, payload, size);
+}
+EXPORT_SYMBOL(afe_dsm_rx_set_params);
+
+int afe_dsm_set_calib(u8 *payload)
+{
+	return afe_dsm_set_params(DSM_TX_PORT_ID, AFE_MODULE_DSM_TX,
+				  AFE_PARAM_ID_CALIB, payload,
+				  3 * sizeof(u32));
+}
+EXPORT_SYMBOL(afe_dsm_set_calib);
+
+int afe_dsm_ramp_dn_cfg(u8 *payload, int delay_in_ms)
+{
+	u32 *params = (u32 *)payload;
+	u32 delay_us;
+	int ret;
+
+	if (!payload || delay_in_ms < 0 || delay_in_ms > U32_MAX / 1000)
+		return -EINVAL;
+	delay_us = delay_in_ms * 1000;
+
+	params[0] = 0;
+	params[1] = 3;
+	params[2] = 0x03000063;
+	params[3] = 5;
+	params[4] = 0x03000064;
+	params[5] = 500;
+	params[6] = 0x03000066;
+	params[7] = 1;
+
+	ret = afe_dsm_rx_set_params(payload, 8 * sizeof(u32));
+	if (ret) {
+		pr_err("%s: Failed to set DSM ramp down, err %d\n",
+		       __func__, ret);
+		return ret;
+	}
+
+	usleep_range(delay_us, delay_us + 10);
+	return 0;
+}
+EXPORT_SYMBOL(afe_dsm_ramp_dn_cfg);
+
+int afe_dsm_pre_calib(u8 *payload)
+{
+	u32 *params = (u32 *)payload;
+	int ret;
+
+	if (!payload)
+		return -EINVAL;
+
+	params[0] = 0;
+	params[1] = 1;
+	params[2] = 0x03000001;
+	params[3] = 4;
+
+	ret = afe_dsm_rx_set_params(payload, 4 * sizeof(u32));
+	if (ret)
+		return ret;
+
+	usleep_range(1000000, 1000010);
+	return 0;
+}
+EXPORT_SYMBOL(afe_dsm_pre_calib);
+
+int afe_dsm_post_calib(u8 *payload)
+{
+	u32 *params = (u32 *)payload;
+
+	if (!payload)
+		return -EINVAL;
+
+	params[0] = 0;
+	params[1] = 1;
+	params[2] = 0x03000001;
+	params[3] = 1;
+
+	return afe_dsm_rx_set_params(payload, 4 * sizeof(u32));
+}
+EXPORT_SYMBOL(afe_dsm_post_calib);
+
+int afe_dsm_get_calib(u8 *payload)
+{
+	return afe_dsm_get_params(DSM_TX_PORT_ID, AFE_MODULE_DSM_TX,
+				  AFE_PARAM_ID_CALIB, payload,
+				  14 * sizeof(u32));
+}
+EXPORT_SYMBOL(afe_dsm_get_calib);
+
+int afe_dsm_get_libary_info(u8 *payload)
+{
+	return afe_dsm_get_params(DSM_TX_PORT_ID, AFE_MODULE_DSM_TX,
+				  AFE_PARAM_ID_DSM_INFO, payload,
+				  8 * sizeof(u32));
+}
+EXPORT_SYMBOL(afe_dsm_get_libary_info);
 
 static int afe_send_cps_config(int src_port)
 {

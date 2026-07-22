@@ -253,6 +253,11 @@ ifeq ($(KERNEL_BUILD), 1)
 	obj-y	+= wsa883x/
 	obj-y	+= sdm660_cdc/
 	obj-y	+= msm_sdw/
+	ifneq ($(filter y,$(CONFIG_MACH_OPPO_R11) $(CONFIG_MACH_OPPO_R11S)),)
+	obj-$(CONFIG_SND_SOC_OPPO_AK4376) += ak4376/
+	obj-$(CONFIG_SND_SOC_OPPO_MAX98927) += max98927/
+	obj-$(CONFIG_SND_SOC_OPPO_TFA98XX) += tfa98xx/
+	endif
 endif
 # Module information used by KBuild framework
 obj-$(CONFIG_WCD9XXX_CODEC_CORE) += wcd_core_dlkm.o

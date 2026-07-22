@@ -1459,6 +1459,23 @@ static int msm_snd_card_late_probe(struct snd_soc_card *card)
 	return ret;
 }
 
+static int ak4376_audrx_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_component *component = rtd->codec_dais[0]->component;
+	struct snd_soc_dapm_context *dapm;
+
+	if (!component)
+		return -EINVAL;
+
+	dapm = snd_soc_component_get_dapm(component);
+	snd_soc_dapm_ignore_suspend(dapm, "AK4376 HPL");
+	snd_soc_dapm_ignore_suspend(dapm, "AK4376 HPR");
+	snd_soc_dapm_ignore_suspend(dapm, "Playback");
+	snd_soc_dapm_sync(dapm);
+
+	return 0;
+}
+
 static struct snd_soc_ops msm_tdm_be_ops = {
 	.startup = msm_tdm_snd_startup,
 	.shutdown = msm_tdm_snd_shutdown,
@@ -2212,6 +2229,24 @@ static struct snd_soc_dai_link msm_int_wsa_dai[] = {
 	},
 };
 
+static struct snd_soc_dai_link maxim_fe_dai[] = {
+	{
+		.name = "Secondary MI2S_TX Hostless",
+		.stream_name = "Secondary MI2S_TX Hostless",
+		.cpu_dai_name = "SEC_MI2S_TX_HOSTLESS",
+		.platform_name = "msm-pcm-hostless",
+		.dynamic = 1,
+		.dpcm_capture = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+	},
+};
+
 static struct snd_soc_dai_link msm_int_compress_capture_dai[] = {
 	{/* hw:x,41 */
 		.name = "Compress9",
@@ -2623,7 +2658,86 @@ static struct snd_soc_dai_link msm_int_be_dai[] = {
 	},
 };
 
-static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
+static int maxim_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+				    struct snd_pcm_hw_params *params)
+{
+	struct snd_interval *rate = hw_param_interval(params,
+					SNDRV_PCM_HW_PARAM_RATE);
+	struct snd_interval *channels = hw_param_interval(params,
+					SNDRV_PCM_HW_PARAM_CHANNELS);
+
+	rate->min = rate->max = SAMPLING_RATE_48KHZ;
+	channels->min = channels->max = 2;
+
+	return 0;
+}
+
+static const struct snd_soc_dai_link maxim_be_dai_links[] = {
+	{
+		.name = LPASS_BE_SEC_MI2S_RX,
+		.stream_name = "Secondary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.1",
+		.platform_name = "msm-pcm-routing",
+		.codec_dai_name = "max98927-aif1",
+		.codec_name = "max98927.6-003a",
+		.no_pcm = 1,
+		.dpcm_playback = 1,
+		.id = MSM_BACKEND_DAI_SECONDARY_MI2S_RX,
+		.be_hw_params_fixup = msm_common_be_hw_params_fixup,
+		.ops = &msm_mi2s_be_ops,
+		.ignore_suspend = 1,
+		.ignore_pmdown_time = 1,
+	},
+	{
+		.name = LPASS_BE_SEC_MI2S_TX,
+		.stream_name = "Secondary MI2S Capture",
+		.cpu_dai_name = "msm-dai-q6-mi2s.1",
+		.platform_name = "msm-pcm-routing",
+		.codec_dai_name = "max98927-aif1",
+		.codec_name = "max98927.6-003a",
+		.no_pcm = 1,
+		.dpcm_capture = 1,
+		.id = MSM_BACKEND_DAI_SECONDARY_MI2S_TX,
+		.be_hw_params_fixup = maxim_be_hw_params_fixup,
+		.ops = &msm_mi2s_be_ops,
+		.ignore_suspend = 1,
+	},
+};
+
+static const struct snd_soc_dai_link ak4376_be_dai_link = {
+	.name = LPASS_BE_PRI_MI2S_RX,
+	.stream_name = "Primary MI2S Playback",
+	.cpu_dai_name = "msm-dai-q6-mi2s.0",
+	.platform_name = "msm-pcm-routing",
+	.codec_name = "ak4376.6-0010",
+	.codec_dai_name = "ak4376-AIF1",
+	.init = ak4376_audrx_init,
+	.no_pcm = 1,
+	.dpcm_playback = 1,
+	.id = MSM_BACKEND_DAI_PRI_MI2S_RX,
+	.be_hw_params_fixup = msm_common_be_hw_params_fixup,
+	.ops = &msm_mi2s_be_ops,
+	.ignore_suspend = 1,
+	.ignore_pmdown_time = 1,
+};
+
+static const struct snd_soc_dai_link tfa98xx_be_dai_link = {
+	.name = LPASS_BE_SEC_MI2S_RX,
+	.stream_name = "Secondary MI2S Playback",
+	.cpu_dai_name = "msm-dai-q6-mi2s.1",
+	.platform_name = "msm-pcm-routing",
+	.codec_name = "tfa98xx.6-0036",
+	.codec_dai_name = "tfa98xx-aif-6-36",
+	.no_pcm = 1,
+	.dpcm_playback = 1,
+	.id = MSM_BACKEND_DAI_SECONDARY_MI2S_RX,
+	.be_hw_params_fixup = msm_common_be_hw_params_fixup,
+	.ops = &msm_mi2s_be_ops,
+	.ignore_suspend = 1,
+	.ignore_pmdown_time = 1,
+};
+
+static const struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 	{
 		.name = LPASS_BE_PRI_MI2S_RX,
 		.stream_name = "Primary MI2S Playback",
@@ -3016,6 +3130,7 @@ static struct snd_soc_dai_link ext_disp_be_dai_link[] = {
 static struct snd_soc_dai_link msm_int_dai_links[
 ARRAY_SIZE(msm_int_dai) +
 ARRAY_SIZE(msm_int_wsa_dai) +
+ARRAY_SIZE(maxim_fe_dai) +
 ARRAY_SIZE(msm_int_compress_capture_dai) +
 ARRAY_SIZE(msm_int_be_dai) +
 ARRAY_SIZE(msm_mi2s_be_dai_links) +
@@ -3082,7 +3197,15 @@ static struct snd_soc_card *msm_int_populate_sndcard_dailinks(
 {
 	struct snd_soc_card *card = &sdm660_card;
 	struct snd_soc_dai_link *dailink;
+	const char *headphone_pa = NULL;
+	const char *speaker_pa = NULL;
+	int mi2s_start;
+	int i;
 	int len1;
+
+	of_property_read_string(dev->of_node, "oppo,headphone-pa",
+				&headphone_pa);
+	of_property_read_string(dev->of_node, "oppo,speaker-pa", &speaker_pa);
 
 	card->name = dev_name(dev);
 	len1 = ARRAY_SIZE(msm_int_dai);
@@ -3095,6 +3218,10 @@ static struct snd_soc_card *msm_int_populate_sndcard_dailinks(
 		       sizeof(msm_int_wsa_dai));
 		len1 += ARRAY_SIZE(msm_int_wsa_dai);
 	}
+	if (speaker_pa && !strcmp(speaker_pa, "maxim")) {
+		memcpy(dailink + len1, maxim_fe_dai, sizeof(maxim_fe_dai));
+		len1 += ARRAY_SIZE(maxim_fe_dai);
+	}
 	memcpy(dailink + len1, msm_int_compress_capture_dai,
 		sizeof(msm_int_compress_capture_dai));
 	len1 += ARRAY_SIZE(msm_int_compress_capture_dai);
@@ -3104,9 +3231,30 @@ static struct snd_soc_card *msm_int_populate_sndcard_dailinks(
 
 	if (of_property_read_bool(dev->of_node,
 				  "qcom,mi2s-audio-intf")) {
+		mi2s_start = len1;
 		memcpy(dailink + len1,
 		       msm_mi2s_be_dai_links,
 		       sizeof(msm_mi2s_be_dai_links));
+		for (i = 0; i < ARRAY_SIZE(msm_mi2s_be_dai_links); i++) {
+			struct snd_soc_dai_link *link = &dailink[mi2s_start + i];
+
+			if (headphone_pa && !strcmp(headphone_pa, "akm") &&
+			    link->id == MSM_BACKEND_DAI_PRI_MI2S_RX)
+				memcpy(link, &ak4376_be_dai_link, sizeof(*link));
+
+			if (!speaker_pa)
+				continue;
+
+			if (!strcmp(speaker_pa, "nxp") &&
+			    link->id == MSM_BACKEND_DAI_SECONDARY_MI2S_RX)
+				memcpy(link, &tfa98xx_be_dai_link, sizeof(*link));
+			else if (!strcmp(speaker_pa, "maxim") &&
+				 link->id == MSM_BACKEND_DAI_SECONDARY_MI2S_RX)
+				memcpy(link, &maxim_be_dai_links[0], sizeof(*link));
+			else if (!strcmp(speaker_pa, "maxim") &&
+				 link->id == MSM_BACKEND_DAI_SECONDARY_MI2S_TX)
+				memcpy(link, &maxim_be_dai_links[1], sizeof(*link));
+		}
 		len1 += ARRAY_SIZE(msm_mi2s_be_dai_links);
 	}
 	if (of_property_read_bool(dev->of_node,
