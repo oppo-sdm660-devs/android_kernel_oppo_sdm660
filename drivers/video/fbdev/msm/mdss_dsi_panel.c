@@ -16,6 +16,9 @@
 #include <linux/pwm.h>
 #include <linux/err.h>
 #include <linux/string.h>
+#ifdef CONFIG_OPPO_DEVICE_INFO
+#include <soc/oppo/device_info.h>
+#endif
 
 #include "mdss_dsi.h"
 #include "mdss_dba_utils.h"
@@ -3097,6 +3100,10 @@ int mdss_dsi_panel_init(struct device_node *node,
 {
 	int rc = 0;
 	static const char *panel_name;
+#ifdef CONFIG_OPPO_DEVICE_INFO
+	const char *panel_manufacture;
+	const char *panel_version;
+#endif
 	struct mdss_panel_info *pinfo;
 
 	if (!node || !ctrl_pdata) {
@@ -3116,6 +3123,21 @@ int mdss_dsi_panel_init(struct device_node *node,
 		pr_info("%s: Panel Name = %s\n", __func__, panel_name);
 		strlcpy(&pinfo->panel_name[0], panel_name, MDSS_MAX_PANEL_LEN);
 	}
+
+#ifdef CONFIG_OPPO_DEVICE_INFO
+	panel_version = of_get_property(node,
+		"qcom,mdss-dsi-panel-version", NULL);
+	panel_manufacture = of_get_property(node,
+		"qcom,mdss-dsi-panel-manufacture", NULL);
+	if (panel_version && panel_manufacture) {
+		rc = register_device_proc("lcd", (char *)panel_version,
+			(char *)panel_manufacture);
+		if (rc)
+			pr_warn("%s: failed to register lcd devinfo: %d\n",
+				__func__, rc);
+	}
+#endif
+
 	rc = mdss_panel_parse_dt(node, ctrl_pdata);
 	if (rc) {
 		pr_err("%s:%d panel dt parse failed\n", __func__, __LINE__);
