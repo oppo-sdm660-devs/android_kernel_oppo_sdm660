@@ -3,9 +3,10 @@
  * Copyright (C) 2011 Google, Inc.
  */
 
-#include <linux/kernel.h>
+#include <linux/dma-buf.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/kernel.h>
 #include <linux/uaccess.h>
 
 #include "ion.h"
@@ -23,8 +24,98 @@ union ion_ioctl_arg {
 	struct ion_fd_data fd;
 	struct ion_old_allocation_data old_allocation;
 	struct ion_handle_data handle;
+	struct ion_custom_data custom;
+	struct ion_flush_data flush;
+	struct ion_legacy_prefetch_data legacy_prefetch;
 #endif
 };
+
+#ifdef CONFIG_ION_LEGACY
+int ion_legacy_cache_ioctl(ion_user_handle_t handle, int fd,
+			   unsigned int offset, unsigned int length,
+			   unsigned int cmd)
+{
+	struct dma_buf *dmabuf;
+	int ret;
+
+	if (handle > 0)
+		fd = handle;
+
+	dmabuf = dma_buf_get(fd);
+	if (IS_ERR(dmabuf))
+		return PTR_ERR(dmabuf);
+
+	ret = ion_legacy_buffer_cache_op(dmabuf, offset, length, cmd);
+	dma_buf_put(dmabuf);
+	return ret;
+}
+
+int ion_legacy_sync_ioctl(int fd)
+{
+	struct dma_buf *dmabuf;
+	int ret;
+
+	dmabuf = dma_buf_get(fd);
+	if (IS_ERR(dmabuf))
+		return PTR_ERR(dmabuf);
+
+	ret = ion_legacy_buffer_sync(dmabuf);
+	dma_buf_put(dmabuf);
+	return ret;
+}
+
+int ion_legacy_prefetch_ioctl(unsigned int cmd,
+			      const struct ion_legacy_prefetch_data *data,
+			      bool compat)
+{
+	struct ion_legacy_prefetch prefetch = {
+		.data = *data,
+		.compat = compat,
+		.shrink = cmd == ION_OLD_IOC_DRAIN || cmd == ION_IOC_DRAIN,
+	};
+	int ret;
+
+	ret = ion_walk_heaps(data->heap_id,
+			     (enum ion_heap_type)ION_HEAP_TYPE_SECURE_DMA,
+			     (void *)data->len, prefetch.shrink ?
+			     ion_secure_cma_drain_pool : ion_secure_cma_prefetch);
+	if (ret)
+		return ret;
+
+	return ion_walk_heaps(data->heap_id,
+			      (enum ion_heap_type)ION_HEAP_TYPE_SYSTEM_SECURE,
+			      &prefetch, ion_system_secure_heap_legacy_resize);
+}
+
+static int ion_legacy_custom_ioctl(const struct ion_custom_data *custom)
+{
+	struct ion_flush_data flush;
+	struct ion_legacy_prefetch_data prefetch;
+
+	switch (custom->cmd) {
+	case ION_IOC_CLEAN_CACHES:
+	case ION_IOC_INV_CACHES:
+	case ION_IOC_CLEAN_INV_CACHES:
+		if (copy_from_user(&flush,
+				   (void __user *)custom->arg, sizeof(flush)))
+			return -EFAULT;
+
+		return ion_legacy_cache_ioctl(flush.handle, flush.fd,
+					      flush.offset, flush.length,
+					      custom->cmd);
+	case ION_OLD_IOC_PREFETCH:
+	case ION_OLD_IOC_DRAIN:
+		if (copy_from_user(&prefetch,
+				   (void __user *)custom->arg,
+				   sizeof(prefetch)))
+			return -EFAULT;
+
+		return ion_legacy_prefetch_ioctl(custom->cmd, &prefetch, false);
+	default:
+		return -ENOTTY;
+	}
+}
+#endif
 
 static int validate_ioctl_arg(unsigned int cmd, union ion_ioctl_arg *arg)
 {
@@ -48,6 +139,13 @@ static unsigned int ion_ioctl_dir(unsigned int cmd)
 	switch (cmd) {
 #ifdef CONFIG_ION_LEGACY
 	case ION_IOC_FREE:
+	case ION_OLD_IOC_PREFETCH:
+	case ION_OLD_IOC_DRAIN:
+	case ION_IOC_CUSTOM:
+	case ION_IOC_SYNC:
+	case ION_IOC_CLEAN_CACHES:
+	case ION_IOC_INV_CACHES:
+	case ION_IOC_CLEAN_INV_CACHES:
 		return _IOC_WRITE;
 #endif
 	default:
@@ -129,6 +227,10 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 	}
 #ifdef CONFIG_ION_LEGACY
+	case ION_OLD_IOC_PREFETCH:
+	case ION_OLD_IOC_DRAIN:
+		ret = ion_legacy_prefetch_ioctl(cmd, &data.legacy_prefetch, false);
+		break;
 	case ION_OLD_IOC_ALLOC:
 	{
 		int fd;
@@ -161,6 +263,20 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 	case ION_IOC_IMPORT:
 		data.fd.handle = data.fd.fd;
+		break;
+	case ION_IOC_CUSTOM:
+		ret = ion_legacy_custom_ioctl(&data.custom);
+		break;
+	case ION_IOC_SYNC:
+		ret = ion_legacy_sync_ioctl(data.fd.fd);
+		break;
+	case ION_IOC_CLEAN_CACHES:
+	case ION_IOC_INV_CACHES:
+	case ION_IOC_CLEAN_INV_CACHES:
+		ret = ion_legacy_cache_ioctl(data.flush.handle,
+					     data.flush.fd,
+					     data.flush.offset,
+					     data.flush.length, cmd);
 		break;
 #endif
 	default:

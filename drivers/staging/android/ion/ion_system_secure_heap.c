@@ -3,6 +3,7 @@
  * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
  */
 
+#include <linux/compat.h>
 #include <linux/slab.h>
 #include <soc/qcom/secure_buffer.h>
 #include <linux/workqueue.h>
@@ -13,6 +14,10 @@
 #include "ion_system_heap.h"
 #include "ion.h"
 #include "ion_secure_util.h"
+
+#ifdef CONFIG_ION_LEGACY
+#include "ion_legacy.h"
+#endif
 
 struct ion_system_secure_heap {
 	struct ion_heap *sys_heap;
@@ -210,20 +215,79 @@ static void ion_system_secure_heap_prefetch_work(struct work_struct *work)
 	spin_unlock_irqrestore(&secure_heap->work_lock, flags);
 }
 
-static int alloc_prefetch_info(struct ion_prefetch_regions __user *
-			       user_regions, bool shrink,
+enum ion_prefetch_format {
+	ION_PREFETCH_FIXED,
+	ION_PREFETCH_NATIVE,
+	ION_PREFETCH_COMPAT,
+};
+
+#ifdef CONFIG_ION_LEGACY
+struct ion_legacy_prefetch_regions {
+	unsigned int vmid;
+	size_t __user *sizes;
+	unsigned int nr_sizes;
+};
+
+#ifdef CONFIG_COMPAT
+struct compat_ion_prefetch_regions {
+	compat_uint_t vmid;
+	compat_uptr_t sizes;
+	compat_uint_t nr_sizes;
+};
+#endif
+#endif
+
+static int alloc_prefetch_info(void __user *user_regions, unsigned int index,
+			       bool shrink, enum ion_prefetch_format format,
 			       struct list_head *items)
 {
+	struct ion_prefetch_regions region;
 	struct prefetch_info *info;
-	u64 user_sizes;
-	int err;
+	void __user *user_sizes;
 	unsigned int nr_sizes, vmid, i;
+	int err;
 
-	err = get_user(nr_sizes, &user_regions->nr_sizes);
-	err |= get_user(user_sizes, &user_regions->sizes);
-	err |= get_user(vmid, &user_regions->vmid);
-	if (err)
-		return -EFAULT;
+	switch (format) {
+	case ION_PREFETCH_FIXED:
+		if (copy_from_user(&region,
+				   (struct ion_prefetch_regions __user *)
+				   user_regions + index, sizeof(region)))
+			return -EFAULT;
+		user_sizes = (void __user *)(uintptr_t)region.sizes;
+		vmid = region.vmid;
+		nr_sizes = region.nr_sizes;
+		break;
+#ifdef CONFIG_ION_LEGACY
+	case ION_PREFETCH_NATIVE: {
+		struct ion_legacy_prefetch_regions region;
+
+		if (copy_from_user(&region,
+				   (struct ion_legacy_prefetch_regions __user *)
+				   user_regions + index, sizeof(region)))
+			return -EFAULT;
+		user_sizes = region.sizes;
+		vmid = region.vmid;
+		nr_sizes = region.nr_sizes;
+		break;
+	}
+#ifdef CONFIG_COMPAT
+	case ION_PREFETCH_COMPAT: {
+		struct compat_ion_prefetch_regions region;
+
+		if (copy_from_user(&region,
+				   (struct compat_ion_prefetch_regions __user *)
+				   user_regions + index, sizeof(region)))
+			return -EFAULT;
+		user_sizes = compat_ptr(region.sizes);
+		vmid = region.vmid;
+		nr_sizes = region.nr_sizes;
+		break;
+	}
+#endif
+#endif
+	default:
+		return -EINVAL;
+	}
 
 	if (!is_secure_vmid_valid(get_secure_vmid(vmid)))
 		return -EINVAL;
@@ -236,29 +300,56 @@ static int alloc_prefetch_info(struct ion_prefetch_regions __user *
 		if (!info)
 			return -ENOMEM;
 
-		err = get_user(info->size, ((u64 __user *)user_sizes + i));
-		if (err)
-			goto out_free;
+		switch (format) {
+		case ION_PREFETCH_FIXED:
+			err = get_user(info->size, (u64 __user *)user_sizes + i);
+			break;
+#ifdef CONFIG_ION_LEGACY
+		case ION_PREFETCH_NATIVE: {
+			size_t size;
+
+			err = get_user(size, (size_t __user *)user_sizes + i);
+			info->size = size;
+			break;
+		}
+#ifdef CONFIG_COMPAT
+		case ION_PREFETCH_COMPAT: {
+			compat_size_t size;
+
+			err = get_user(size,
+				       (compat_size_t __user *)user_sizes + i);
+			info->size = size;
+			break;
+		}
+#endif
+#endif
+		default:
+			err = -EINVAL;
+			break;
+		}
+		if (err) {
+			kfree(info);
+			return err;
+		}
 
 		info->vmid = vmid;
 		info->shrink = shrink;
 		INIT_LIST_HEAD(&info->list);
 		list_add_tail(&info->list, items);
 	}
-	return err;
-out_free:
-	kfree(info);
-	return err;
+	return 0;
 }
 
-static int __ion_system_secure_heap_resize(struct ion_heap *heap, void *ptr,
-					   bool shrink)
+static int __ion_system_secure_heap_resize(struct ion_heap *heap,
+					   void __user *regions,
+					   unsigned int nr_regions, bool shrink,
+					   enum ion_prefetch_format format)
 {
 	struct ion_system_secure_heap *secure_heap = container_of(heap,
 						struct ion_system_secure_heap,
 						heap);
-	struct ion_prefetch_data *data = ptr;
-	int i, ret = 0;
+	unsigned int i;
+	int ret = 0;
 	struct prefetch_info *info, *tmp;
 	unsigned long flags;
 	LIST_HEAD(items);
@@ -266,14 +357,11 @@ static int __ion_system_secure_heap_resize(struct ion_heap *heap, void *ptr,
 	if ((int)heap->type != ION_HEAP_TYPE_SYSTEM_SECURE)
 		return -EINVAL;
 
-	if (data->nr_regions > 0x10)
+	if (nr_regions > 0x10)
 		return -EINVAL;
 
-	for (i = 0; i < data->nr_regions; i++) {
-		struct ion_prefetch_regions *r;
-
-		r = (struct ion_prefetch_regions *)data->regions + i;
-		ret = alloc_prefetch_info(r, shrink, &items);
+	for (i = 0; i < nr_regions; i++) {
+		ret = alloc_prefetch_info(regions, i, shrink, format, &items);
 		if (ret)
 			goto out_free;
 	}
@@ -300,13 +388,33 @@ out_free:
 
 int ion_system_secure_heap_prefetch(struct ion_heap *heap, void *ptr)
 {
-	return __ion_system_secure_heap_resize(heap, ptr, false);
+	struct ion_prefetch_data *data = ptr;
+
+	return __ion_system_secure_heap_resize(heap,
+			(void __user *)(uintptr_t)data->regions,
+			data->nr_regions, false, ION_PREFETCH_FIXED);
 }
 
 int ion_system_secure_heap_drain(struct ion_heap *heap, void *ptr)
 {
-	return __ion_system_secure_heap_resize(heap, ptr, true);
+	struct ion_prefetch_data *data = ptr;
+
+	return __ion_system_secure_heap_resize(heap,
+			(void __user *)(uintptr_t)data->regions,
+			data->nr_regions, true, ION_PREFETCH_FIXED);
 }
+
+#ifdef CONFIG_ION_LEGACY
+int ion_system_secure_heap_legacy_resize(struct ion_heap *heap, void *ptr)
+{
+	struct ion_legacy_prefetch *prefetch = ptr;
+
+	return __ion_system_secure_heap_resize(heap, prefetch->data.regions,
+			prefetch->data.nr_regions, prefetch->shrink,
+			prefetch->compat ? ION_PREFETCH_COMPAT :
+			ION_PREFETCH_NATIVE);
+}
+#endif
 
 static void *ion_system_secure_heap_map_kernel(struct ion_heap *heap,
 					       struct ion_buffer *buffer)

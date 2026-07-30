@@ -11,11 +11,13 @@
 #include <linux/debugfs.h>
 #include <linux/device.h>
 #include <linux/dma-buf.h>
+#include <linux/dma-mapping.h>
 #include <linux/err.h>
 #include <linux/export.h>
 #include <linux/file.h>
 #include <linux/freezer.h>
 #include <linux/fs.h>
+#include <linux/highmem.h>
 #include <linux/idr.h>
 #include <linux/kthread.h>
 #include <linux/list.h>
@@ -23,6 +25,7 @@
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/mm_types.h>
+#include <linux/overflow.h>
 #include <linux/rbtree.h>
 #include <linux/sched/task.h>
 #include <linux/seq_file.h>
@@ -31,6 +34,7 @@
 #include <linux/vmalloc.h>
 #include <linux/bitops.h>
 #include <linux/msm_dma_iommu_mapping.h>
+#include <asm/cacheflush.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/ion.h>
 #include <soc/qcom/secure_buffer.h>
@@ -38,6 +42,9 @@
 #include "ion.h"
 #include "ion_secure_util.h"
 #include "compat_ion.h"
+#ifdef CONFIG_ION_LEGACY
+#include "ion_legacy.h"
+#endif
 
 static struct ion_device *internal_dev;
 static atomic_long_t total_heap_bytes;
@@ -1033,6 +1040,215 @@ static const struct dma_buf_ops dma_buf_ops = {
 	.vunmap = ion_dma_buf_vunmap,
 	.get_flags = ion_dma_buf_get_flags,
 };
+
+#ifdef CONFIG_ION_LEGACY
+static void ion_legacy_clean_range(const void *start, const void *end)
+{
+	dmac_clean_range(start, end);
+}
+
+static void ion_legacy_inv_range(const void *start, const void *end)
+{
+	dmac_inv_range(start, end);
+}
+
+static void ion_legacy_flush_range(const void *start, const void *end)
+{
+	dmac_flush_range(start, end);
+}
+
+static int ion_legacy_cache_pages(struct page *page, size_t offset,
+				  size_t length,
+				  void (*op)(const void *, const void *))
+{
+	unsigned long pfn, last_pfn;
+	size_t last;
+	void *vaddr;
+
+	if (check_add_overflow(page_to_pfn(page), offset >> PAGE_SHIFT, &pfn))
+		return -EINVAL;
+	offset &= ~PAGE_MASK;
+	if (check_add_overflow(length - 1, offset, &last) ||
+	    check_add_overflow(pfn, last >> PAGE_SHIFT, &last_pfn) ||
+	    !pfn_valid(pfn) || !pfn_valid(last_pfn))
+		return -EINVAL;
+
+	page = pfn_to_page(pfn);
+	if (!PageHighMem(page) && !PageHighMem(pfn_to_page(last_pfn))) {
+		unsigned long start, end;
+
+		vaddr = page_address(page);
+		if (!vaddr ||
+		    check_add_overflow((unsigned long)vaddr, offset, &start) ||
+		    check_add_overflow(start, length, &end))
+			return -EINVAL;
+		op((void *)start, (void *)end);
+		return 0;
+	}
+
+	while (length) {
+		size_t len = min_t(size_t, length, PAGE_SIZE - offset);
+
+		if (!pfn_valid(pfn))
+			return -EINVAL;
+		page = pfn_to_page(pfn);
+		vaddr = kmap_atomic(page);
+		op((char *)vaddr + offset, (char *)vaddr + offset + len);
+		kunmap_atomic(vaddr);
+
+		offset = 0;
+		pfn++;
+		length -= len;
+	}
+	return 0;
+}
+
+static int ion_legacy_cache_mapping(struct ion_buffer *buffer, size_t offset,
+				    size_t length,
+				    void (*op)(const void *, const void *))
+{
+	unsigned long start, end;
+	void *vaddr;
+	int ret = 0;
+
+	/* The generic mapper requires page-backed scatterlist entries. */
+	if (!buffer->heap->ops->map_kernel ||
+	    !buffer->heap->ops->unmap_kernel ||
+	    (!buffer->kmap_cnt &&
+	     buffer->heap->ops->map_kernel == ion_heap_map_kernel))
+		return -EINVAL;
+
+	vaddr = ion_buffer_kmap_get(buffer);
+	if (IS_ERR(vaddr))
+		return PTR_ERR(vaddr);
+
+	if (check_add_overflow((unsigned long)vaddr, offset, &start) ||
+	    check_add_overflow(start, length, &end))
+		ret = -EINVAL;
+	else
+		op((void *)start, (void *)end);
+
+	ion_buffer_kmap_put(buffer);
+	return ret;
+}
+
+static int ion_legacy_cache_range(struct ion_buffer *buffer, size_t offset,
+				  size_t length,
+				  void (*op)(const void *, const void *))
+{
+	struct sg_table *table = buffer->sg_table;
+	struct scatterlist *sg;
+	size_t skip = offset, left = length;
+	bool no_pages = false;
+	int i, ret;
+
+	if (!length)
+		return 0;
+	if (IS_ERR_OR_NULL(table))
+		return table ? PTR_ERR(table) : -EINVAL;
+	if (!table->sgl || !table->nents)
+		return -EINVAL;
+
+	for_each_sg(table->sgl, sg, table->nents, i) {
+		size_t size, page_offset;
+
+		if (skip >= sg->length) {
+			skip -= sg->length;
+			continue;
+		}
+		if (check_add_overflow((size_t)sg->offset, skip, &page_offset))
+			return -EINVAL;
+		if (!sg_page(sg))
+			no_pages = true;
+
+		size = min_t(size_t, left, sg->length - skip);
+		skip = 0;
+		left -= size;
+		if (!left)
+			break;
+	}
+	if (left)
+		return -EINVAL;
+	if (no_pages)
+		return ion_legacy_cache_mapping(buffer, offset, length, op);
+
+	skip = offset;
+	left = length;
+	for_each_sg(table->sgl, sg, table->nents, i) {
+		size_t size;
+
+		if (skip >= sg->length) {
+			skip -= sg->length;
+			continue;
+		}
+		size = min_t(size_t, left, sg->length - skip);
+		ret = ion_legacy_cache_pages(sg_page(sg), sg->offset + skip,
+					     size, op);
+		if (ret)
+			return ret;
+		skip = 0;
+		left -= size;
+		if (!left)
+			break;
+	}
+	return 0;
+}
+
+int ion_legacy_buffer_cache_op(struct dma_buf *dmabuf, size_t offset,
+			       size_t length, unsigned int cmd)
+{
+	struct ion_buffer *buffer;
+	void (*op)(const void *, const void *);
+	int ret = 0;
+
+	if (!dmabuf || dmabuf->ops != &dma_buf_ops)
+		return -EINVAL;
+	if (offset > dmabuf->size || length > dmabuf->size - offset)
+		return -EINVAL;
+
+	switch (cmd) {
+	case ION_IOC_CLEAN_CACHES:
+		op = ion_legacy_clean_range;
+		break;
+	case ION_IOC_INV_CACHES:
+		op = ion_legacy_inv_range;
+		break;
+	case ION_IOC_CLEAN_INV_CACHES:
+		op = ion_legacy_flush_range;
+		break;
+	default:
+		return -ENOTTY;
+	}
+
+	buffer = dmabuf->priv;
+	mutex_lock(&buffer->lock);
+	if (ion_buffer_cached(buffer) && get_secure_vmid(buffer->flags) < 0 &&
+	    hlos_accessible_buffer(buffer))
+		ret = ion_legacy_cache_range(buffer, offset, length, op);
+	mutex_unlock(&buffer->lock);
+	return ret;
+}
+
+int ion_legacy_buffer_sync(struct dma_buf *dmabuf)
+{
+	struct ion_buffer *buffer;
+	int ret;
+
+	if (!dmabuf || dmabuf->ops != &dma_buf_ops)
+		return -EINVAL;
+
+	buffer = dmabuf->priv;
+	mutex_lock(&buffer->lock);
+	if (get_secure_vmid(buffer->flags) > 0 ||
+	    !hlos_accessible_buffer(buffer))
+		ret = -EINVAL;
+	else
+		ret = ion_legacy_cache_range(buffer, 0, buffer->size,
+					     ion_legacy_clean_range);
+	mutex_unlock(&buffer->lock);
+	return ret;
+}
+#endif
 
 struct dma_buf *ion_alloc_dmabuf(size_t len, unsigned int heap_id_mask,
 				 unsigned int flags)

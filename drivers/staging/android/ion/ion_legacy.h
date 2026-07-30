@@ -4,6 +4,7 @@
 #ifdef CONFIG_ION_LEGACY
 
 #include "../uapi/ion.h"
+#include "../uapi/msm_ion.h"
 
 typedef int ion_user_handle_t;
 
@@ -48,6 +49,32 @@ struct ion_fd_data {
  */
 struct ion_handle_data {
 	ion_user_handle_t handle;
+};
+
+struct ion_custom_data {
+	unsigned int cmd;
+	unsigned long arg;
+};
+
+struct ion_flush_data {
+	ion_user_handle_t handle;
+	int fd;
+	void *vaddr;
+	unsigned int offset;
+	unsigned int length;
+};
+
+struct ion_legacy_prefetch_data {
+	int heap_id;
+	unsigned long len;
+	void __user *regions;
+	unsigned int nr_regions;
+};
+
+struct ion_legacy_prefetch {
+	struct ion_legacy_prefetch_data data;
+	bool compat;
+	bool shrink;
 };
 
 /**
@@ -95,6 +122,29 @@ struct ion_handle_data {
  * filed set to the corresponding opaque handle.
  */
 #define ION_IOC_IMPORT		_IOWR(ION_IOC_MAGIC, 5, struct ion_fd_data)
+
+#define ION_IOC_CUSTOM		_IOWR(ION_IOC_MAGIC, 6, struct ion_custom_data)
+
+#define ION_IOC_SYNC		_IOWR(ION_IOC_MAGIC, 7, struct ion_fd_data)
+
+#define ION_IOC_CLEAN_CACHES	_IOWR(ION_IOC_MSM_MAGIC, 0, \
+					      struct ion_flush_data)
+#define ION_IOC_INV_CACHES	_IOWR(ION_IOC_MSM_MAGIC, 1, \
+					      struct ion_flush_data)
+#define ION_IOC_CLEAN_INV_CACHES _IOWR(ION_IOC_MSM_MAGIC, 2, \
+					       struct ion_flush_data)
+#define ION_OLD_IOC_PREFETCH	_IOWR(ION_IOC_MSM_MAGIC, 3, \
+					      struct ion_legacy_prefetch_data)
+#define ION_OLD_IOC_DRAIN		_IOWR(ION_IOC_MSM_MAGIC, 4, \
+					      struct ion_legacy_prefetch_data)
+
+int ion_legacy_cache_ioctl(ion_user_handle_t handle, int fd,
+			   unsigned int offset, unsigned int length,
+			   unsigned int cmd);
+int ion_legacy_sync_ioctl(int fd);
+int ion_legacy_prefetch_ioctl(unsigned int cmd,
+			      const struct ion_legacy_prefetch_data *data,
+			      bool compat);
 
 #endif /* CONFIG_ION_LEGACY */
 

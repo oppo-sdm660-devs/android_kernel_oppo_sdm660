@@ -148,6 +148,16 @@ struct ion_buffer {
 
 void ion_buffer_destroy(struct ion_buffer *buffer);
 
+#ifdef CONFIG_ION_LEGACY
+struct dma_buf;
+
+int ion_legacy_buffer_cache_op(struct dma_buf *dmabuf, size_t offset,
+			       size_t length, unsigned int cmd);
+int ion_legacy_buffer_sync(struct dma_buf *dmabuf);
+int ion_secure_cma_prefetch(struct ion_heap *heap, void *data);
+int ion_secure_cma_drain_pool(struct ion_heap *heap, void *data);
+#endif
+
 /**
  * struct ion_device - the metadata of the ion device node
  * @dev:		the actual misc device
