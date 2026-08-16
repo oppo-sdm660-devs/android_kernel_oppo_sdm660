@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config OPPO_FINGERPRINT
+	bool "OPPO fingerprint driver"
+	depends on OPPO_COMMON_SOFT && OF && GPIOLIB && INPUT
+	depends on REGULATOR && PROC_FS && FB=y
+	help
+	  Say Y here to enable OPPO fingerprint support for SDM660 devices.

@@ -85,3 +85,5 @@ obj-$(CONFIG_INPUT_WM831X_ON)		+= wm831x-on.o
 obj-$(CONFIG_INPUT_XEN_KBDDEV_FRONTEND)	+= xen-kbdfront.o
 obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
 obj-$(CONFIG_INPUT_IDEAPAD_SLIDEBAR)	+= ideapad_slidebar.o
+obj-$(CONFIG_OPPO_FINGERPRINT)		+= oppo_fp_drivers/
+obj-$(CONFIG_MACH_OPPO_SDM660)		+= oppo_seccommon_drivers/
