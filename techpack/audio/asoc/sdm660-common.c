@@ -228,7 +228,7 @@ static bool msm_swap_gnd_mic(struct snd_soc_component *component, bool active);
 static struct wcd_mbhc_config mbhc_cfg = {
 	.read_fw_bin = false,
 	.calibration = NULL,
-	.detect_extn_cable = true,
+	.detect_extn_cable = false,
 	.mono_stero_detection = false,
 	.swap_gnd_mic = NULL,
 	.hs_ext_micbias = true,
@@ -241,11 +241,24 @@ static struct wcd_mbhc_config mbhc_cfg = {
 	.key_code[6] = 0,
 	.key_code[7] = 0,
 	.linein_th = 5000,
+	.skip_gnd_mic_swap = false,
 	.moisture_en = false,
 	.mbhc_micbias = 0,
 	.anc_micbias = 0,
 	.enable_anc_mic_detect = false,
 };
+
+static void msm_configure_mbhc_for_headphone_pa(struct device_node *node)
+{
+	const char *headphone_pa;
+	bool akm_headphone_pa;
+
+	akm_headphone_pa =
+		!of_property_read_string(node, "oppo,headphone-pa", &headphone_pa) &&
+		!strcmp(headphone_pa, "akm");
+	mbhc_cfg.skip_gnd_mic_swap = akm_headphone_pa;
+	mbhc_cfg.linein_th = akm_headphone_pa ? 0 : 5000;
+}
 
 static struct dev_config proxy_rx_cfg = {
 	.sample_rate = SAMPLING_RATE_48KHZ,
@@ -5395,6 +5408,9 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 	if (!match)
 		goto err;
 
+	mbhc_cfg.linein_th = 5000;
+	mbhc_cfg.skip_gnd_mic_swap = false;
+
 	ret = of_property_read_u32(pdev->dev.of_node, mclk, &id);
 	if (ret) {
 		dev_err(&pdev->dev,
@@ -5414,6 +5430,7 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 			goto err;
 	} else if (!strcmp(match->data, "internal_codec")) {
 		pdata->snd_card_val = INT_SND_CARD;
+		msm_configure_mbhc_for_headphone_pa(pdev->dev.of_node);
 		ret = msm_int_cdc_init(pdev, pdata, &card, &mbhc_cfg);
 		if (ret)
 			goto err;
