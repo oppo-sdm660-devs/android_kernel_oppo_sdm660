@@ -31,10 +31,6 @@ struct compat_ion_old_allocation_data {
 	compat_int_t handle;
 };
 
-struct compat_ion_handle_data {
-	compat_int_t handle;
-};
-
 struct compat_ion_custom_data {
 	compat_uint_t cmd;
 	compat_ulong_t arg;
@@ -57,8 +53,6 @@ struct compat_ion_prefetch_data {
 
 #define COMPAT_ION_IOC_ALLOC	_IOWR(ION_IOC_MAGIC, 0, \
 				      struct compat_ion_old_allocation_data)
-#define COMPAT_ION_IOC_FREE	_IOWR(ION_IOC_MAGIC, 1, \
-				      struct compat_ion_handle_data)
 #define COMPAT_ION_IOC_CUSTOM	_IOWR(ION_IOC_MAGIC, 6, \
 				      struct compat_ion_custom_data)
 #define COMPAT_ION_IOC_CLEAN_CACHES _IOWR(ION_IOC_MSM_MAGIC, 0, \
@@ -72,66 +66,7 @@ struct compat_ion_prefetch_data {
 #define COMPAT_ION_IOC_DRAIN	_IOWR(ION_IOC_MSM_MAGIC, 4, \
 				      struct compat_ion_prefetch_data)
 
-static int compat_get_ion_allocation_data(
-			struct compat_ion_old_allocation_data __user *data32,
-			struct ion_old_allocation_data __user *data)
-{
-	compat_size_t s;
-	compat_uint_t u;
-	compat_int_t i;
-	int err;
-
-	err = get_user(s, &data32->len);
-	err |= put_user(s, &data->len);
-	err |= get_user(s, &data32->align);
-	err |= put_user(s, &data->align);
-	err |= get_user(u, &data32->heap_id_mask);
-	err |= put_user(u, &data->heap_id_mask);
-	err |= get_user(u, &data32->flags);
-	err |= put_user(u, &data->flags);
-	err |= get_user(i, &data32->handle);
-	err |= put_user(i, &data->handle);
-
-	return err;
-}
-
-static int compat_get_ion_handle_data(
-			struct compat_ion_handle_data __user *data32,
-			struct ion_handle_data __user *data)
-{
-	compat_int_t i;
-	int err;
-
-	err = get_user(i, &data32->handle);
-	err |= put_user(i, &data->handle);
-
-	return err;
-}
-
-static int compat_put_ion_allocation_data(
-			struct compat_ion_old_allocation_data __user *data32,
-			struct ion_old_allocation_data __user *data)
-{
-	compat_size_t s;
-	compat_uint_t u;
-	compat_int_t i;
-	int err;
-
-	err = get_user(s, &data->len);
-	err |= put_user(s, &data32->len);
-	err |= get_user(s, &data->align);
-	err |= put_user(s, &data32->align);
-	err |= get_user(u, &data->heap_id_mask);
-	err |= put_user(u, &data32->heap_id_mask);
-	err |= get_user(u, &data->flags);
-	err |= put_user(u, &data32->flags);
-	err |= get_user(i, &data->handle);
-	err |= put_user(i, &data32->handle);
-
-	return err;
-}
-
-static int compat_ion_legacy_cache_ioctl(unsigned int cmd,
+static int compat_ion_legacy_cache_ioctl(struct file *filp, unsigned int cmd,
 					 unsigned long arg)
 {
 	struct compat_ion_flush_data flush;
@@ -154,7 +89,7 @@ static int compat_ion_legacy_cache_ioctl(unsigned int cmd,
 	if (copy_from_user(&flush, compat_ptr(arg), sizeof(flush)))
 		return -EFAULT;
 
-	return ion_legacy_cache_ioctl(flush.handle, flush.fd,
+	return ion_legacy_cache_ioctl(filp, flush.handle, flush.fd,
 				      flush.offset, flush.length, native_cmd);
 }
 
@@ -187,7 +122,8 @@ static long compat_ion_legacy_prefetch_ioctl(unsigned int cmd,
 	return ion_legacy_prefetch_ioctl(native_cmd, &data, true);
 }
 
-static long compat_ion_legacy_custom_ioctl(unsigned long arg)
+static long compat_ion_legacy_custom_ioctl(struct file *filp,
+					   unsigned long arg)
 {
 	struct compat_ion_custom_data custom;
 
@@ -198,7 +134,7 @@ static long compat_ion_legacy_custom_ioctl(unsigned long arg)
 	case COMPAT_ION_IOC_CLEAN_CACHES:
 	case COMPAT_ION_IOC_INV_CACHES:
 	case COMPAT_ION_IOC_CLEAN_INV_CACHES:
-		return compat_ion_legacy_cache_ioctl(custom.cmd, custom.arg);
+		return compat_ion_legacy_cache_ioctl(filp, custom.cmd, custom.arg);
 	case COMPAT_ION_IOC_PREFETCH:
 	case COMPAT_ION_IOC_DRAIN:
 		return compat_ion_legacy_prefetch_ioctl(custom.cmd, custom.arg);
@@ -209,8 +145,6 @@ static long compat_ion_legacy_custom_ioctl(unsigned long arg)
 
 long compat_ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	long ret;
-
 	if (!filp->f_op->unlocked_ioctl)
 		return -ENOTTY;
 
@@ -218,49 +152,26 @@ long compat_ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case COMPAT_ION_IOC_ALLOC:
 	{
 		struct compat_ion_old_allocation_data __user *data32;
-		struct ion_old_allocation_data __user *data;
-		int err;
+		struct compat_ion_old_allocation_data data;
 
 		data32 = compat_ptr(arg);
-		data = compat_alloc_user_space(sizeof(*data));
-		if (!data)
+		if (copy_from_user(&data, data32, sizeof(data)))
 			return -EFAULT;
 
-		err = compat_get_ion_allocation_data(data32, data);
-		if (err)
-			return err;
-		ret = filp->f_op->unlocked_ioctl(filp, ION_OLD_IOC_ALLOC,
-							(unsigned long)data);
-		err = compat_put_ion_allocation_data(data32, data);
-		return ret ? ret : err;
-	}
-	case COMPAT_ION_IOC_FREE:
-	{
-		struct compat_ion_handle_data __user *data32;
-		struct ion_handle_data __user *data;
-		int err;
-
-		data32 = compat_ptr(arg);
-		data = compat_alloc_user_space(sizeof(*data));
-		if (!data)
-			return -EFAULT;
-
-		err = compat_get_ion_handle_data(data32, data);
-		if (err)
-			return err;
-
-		return filp->f_op->unlocked_ioctl(filp, ION_IOC_FREE,
-							(unsigned long)data);
+		return ion_legacy_alloc_ioctl(filp, data.len, data.align,
+					      data.heap_id_mask, data.flags,
+					      &data32->handle);
 	}
 	case COMPAT_ION_IOC_CUSTOM:
-		return compat_ion_legacy_custom_ioctl(arg);
+		return compat_ion_legacy_custom_ioctl(filp, arg);
 	case COMPAT_ION_IOC_CLEAN_CACHES:
 	case COMPAT_ION_IOC_INV_CACHES:
 	case COMPAT_ION_IOC_CLEAN_INV_CACHES:
-		return compat_ion_legacy_cache_ioctl(cmd, arg);
+		return compat_ion_legacy_cache_ioctl(filp, cmd, arg);
 	case COMPAT_ION_IOC_PREFETCH:
 	case COMPAT_ION_IOC_DRAIN:
 		return compat_ion_legacy_prefetch_ioctl(cmd, arg);
+	case ION_IOC_FREE:
 	case ION_IOC_SHARE:
 	case ION_IOC_MAP:
 	case ION_IOC_IMPORT:

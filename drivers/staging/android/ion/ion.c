@@ -107,11 +107,16 @@ static void ion_buffer_add(struct ion_device *dev,
 static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 					    struct ion_device *dev,
 					    unsigned long len,
+					    unsigned long align,
 					    unsigned long flags)
 {
 	struct ion_buffer *buffer;
 	struct sg_table *table;
 	int ret;
+
+	if (align > PAGE_SIZE && heap->type != ION_HEAP_TYPE_SYSTEM_CONTIG &&
+	    heap->type != ION_HEAP_TYPE_CHUNK)
+		return ERR_PTR(-EINVAL);
 
 	buffer = kzalloc(sizeof(*buffer), GFP_KERNEL);
 	if (!buffer)
@@ -121,6 +126,7 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 	buffer->flags = flags;
 	buffer->dev = dev;
 	buffer->size = len;
+	buffer->alignment = align;
 
 	ret = heap->ops->allocate(heap, buffer, len, flags);
 
@@ -1042,6 +1048,11 @@ static const struct dma_buf_ops dma_buf_ops = {
 };
 
 #ifdef CONFIG_ION_LEGACY
+bool ion_legacy_buffer_is_ion(struct dma_buf *dmabuf)
+{
+	return dmabuf && dmabuf->ops == &dma_buf_ops;
+}
+
 static void ion_legacy_clean_range(const void *start, const void *end)
 {
 	dmac_clean_range(start, end);
@@ -1250,8 +1261,9 @@ int ion_legacy_buffer_sync(struct dma_buf *dmabuf)
 }
 #endif
 
-struct dma_buf *ion_alloc_dmabuf(size_t len, unsigned int heap_id_mask,
-				 unsigned int flags)
+struct dma_buf *ion_alloc_dmabuf_aligned(size_t len, size_t align,
+					 unsigned int heap_id_mask,
+					 unsigned int flags)
 {
 	struct ion_device *dev = internal_dev;
 	struct ion_buffer *buffer = NULL;
@@ -1268,17 +1280,16 @@ struct dma_buf *ion_alloc_dmabuf(size_t len, unsigned int heap_id_mask,
 	 * request of the caller allocate from it.  Repeat until allocate has
 	 * succeeded or all heaps have been tried
 	 */
-	len = PAGE_ALIGN(len);
-
-	if (!len)
+	if (!len || len > SIZE_MAX - (PAGE_SIZE - 1))
 		return ERR_PTR(-EINVAL);
+	len = PAGE_ALIGN(len);
 
 	down_read(&dev->lock);
 	plist_for_each_entry(heap, &dev->heaps, node) {
 		/* if the caller didn't specify this heap id */
 		if (!((1 << heap->id) & heap_id_mask))
 			continue;
-		buffer = ion_buffer_create(heap, dev, len, flags);
+		buffer = ion_buffer_create(heap, dev, len, align, flags);
 		if (!IS_ERR(buffer) || PTR_ERR(buffer) == -EINTR)
 			break;
 	}
@@ -1306,6 +1317,12 @@ struct dma_buf *ion_alloc_dmabuf(size_t len, unsigned int heap_id_mask,
 	}
 
 	return dmabuf;
+}
+
+struct dma_buf *ion_alloc_dmabuf(size_t len, unsigned int heap_id_mask,
+				 unsigned int flags)
+{
+	return ion_alloc_dmabuf_aligned(len, 0, heap_id_mask, flags);
 }
 
 struct dma_buf *ion_alloc(size_t len, unsigned int heap_id_mask,
@@ -1412,6 +1429,8 @@ static const struct file_operations ion_fops = {
 	.owner          = THIS_MODULE,
 	.unlocked_ioctl = ion_ioctl,
 #ifdef CONFIG_ION_LEGACY
+	.open		= ion_legacy_open,
+	.release	= ion_legacy_release,
 	.compat_ioctl	= compat_ion_ioctl,
 #else
 	.compat_ioctl	= compat_ptr_ioctl,

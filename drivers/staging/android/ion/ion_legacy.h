@@ -138,7 +138,19 @@ struct ion_legacy_prefetch {
 #define ION_OLD_IOC_DRAIN		_IOWR(ION_IOC_MSM_MAGIC, 4, \
 					      struct ion_legacy_prefetch_data)
 
-int ion_legacy_cache_ioctl(ion_user_handle_t handle, int fd,
+struct file;
+struct inode;
+struct dma_buf;
+
+int ion_legacy_open(struct inode *inode, struct file *file);
+int ion_legacy_release(struct inode *inode, struct file *file);
+struct dma_buf *ion_legacy_handle_get(struct file *file, int id);
+bool ion_legacy_buffer_is_ion(struct dma_buf *dmabuf);
+int ion_legacy_alloc_ioctl(struct file *file, size_t len, size_t align,
+			   unsigned int heap_id_mask, unsigned int flags,
+			   int __user *user_handle);
+long ion_legacy_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+int ion_legacy_cache_ioctl(struct file *file, ion_user_handle_t handle, int fd,
 			   unsigned int offset, unsigned int length,
 			   unsigned int cmd);
 int ion_legacy_sync_ioctl(int fd);

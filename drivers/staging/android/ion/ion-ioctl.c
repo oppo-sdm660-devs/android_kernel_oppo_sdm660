@@ -22,8 +22,6 @@ union ion_ioctl_arg {
 	struct ion_prefetch_data prefetch_data;
 #ifdef CONFIG_ION_LEGACY
 	struct ion_fd_data fd;
-	struct ion_old_allocation_data old_allocation;
-	struct ion_handle_data handle;
 	struct ion_custom_data custom;
 	struct ion_flush_data flush;
 	struct ion_legacy_prefetch_data legacy_prefetch;
@@ -31,7 +29,7 @@ union ion_ioctl_arg {
 };
 
 #ifdef CONFIG_ION_LEGACY
-int ion_legacy_cache_ioctl(ion_user_handle_t handle, int fd,
+int ion_legacy_cache_ioctl(struct file *file, ion_user_handle_t handle, int fd,
 			   unsigned int offset, unsigned int length,
 			   unsigned int cmd)
 {
@@ -39,9 +37,9 @@ int ion_legacy_cache_ioctl(ion_user_handle_t handle, int fd,
 	int ret;
 
 	if (handle > 0)
-		fd = handle;
-
-	dmabuf = dma_buf_get(fd);
+		dmabuf = ion_legacy_handle_get(file, handle);
+	else
+		dmabuf = dma_buf_get(fd);
 	if (IS_ERR(dmabuf))
 		return PTR_ERR(dmabuf);
 
@@ -87,7 +85,8 @@ int ion_legacy_prefetch_ioctl(unsigned int cmd,
 			      &prefetch, ion_system_secure_heap_legacy_resize);
 }
 
-static int ion_legacy_custom_ioctl(const struct ion_custom_data *custom)
+static int ion_legacy_custom_ioctl(struct file *file,
+				   const struct ion_custom_data *custom)
 {
 	struct ion_flush_data flush;
 	struct ion_legacy_prefetch_data prefetch;
@@ -100,7 +99,7 @@ static int ion_legacy_custom_ioctl(const struct ion_custom_data *custom)
 				   (void __user *)custom->arg, sizeof(flush)))
 			return -EFAULT;
 
-		return ion_legacy_cache_ioctl(flush.handle, flush.fd,
+		return ion_legacy_cache_ioctl(file, flush.handle, flush.fd,
 					      flush.offset, flush.length,
 					      custom->cmd);
 	case ION_OLD_IOC_PREFETCH:
@@ -158,6 +157,17 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	int ret = 0;
 	unsigned int dir;
 	union ion_ioctl_arg data;
+
+#ifdef CONFIG_ION_LEGACY
+	switch (cmd) {
+	case ION_OLD_IOC_ALLOC:
+	case ION_IOC_FREE:
+	case ION_IOC_SHARE:
+	case ION_IOC_MAP:
+	case ION_IOC_IMPORT:
+		return ion_legacy_ioctl(filp, cmd, arg);
+	}
+#endif
 
 	dir = ion_ioctl_dir(cmd);
 
@@ -231,41 +241,8 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case ION_OLD_IOC_DRAIN:
 		ret = ion_legacy_prefetch_ioctl(cmd, &data.legacy_prefetch, false);
 		break;
-	case ION_OLD_IOC_ALLOC:
-	{
-		int fd;
-
-		fd = ion_alloc_fd(data.old_allocation.len,
-				  data.old_allocation.heap_id_mask,
-				  data.old_allocation.flags);
-		if (fd < 0)
-			return fd;
-
-		data.old_allocation.handle = fd;
-
-		break;
-	}
-	case ION_IOC_FREE:
-		/*
-		 * libion passes 0 as the handle to check for this ioctl's
-		 * existence and expects -ENOTTY on kernel 4.12+ as an indicator
-		 * of having a new ION ABI. We want to use new ION as much as
-		 * possible, so pretend that this ioctl doesn't exist when
-		 * libion checks for it.
-		 */
-		if (!data.handle.handle)
-			ret = -ENOTTY;
-
-		break;
-	case ION_IOC_SHARE:
-	case ION_IOC_MAP:
-		data.fd.fd = data.fd.handle;
-		break;
-	case ION_IOC_IMPORT:
-		data.fd.handle = data.fd.fd;
-		break;
 	case ION_IOC_CUSTOM:
-		ret = ion_legacy_custom_ioctl(&data.custom);
+		ret = ion_legacy_custom_ioctl(filp, &data.custom);
 		break;
 	case ION_IOC_SYNC:
 		ret = ion_legacy_sync_ioctl(data.fd.fd);
@@ -273,7 +250,7 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case ION_IOC_CLEAN_CACHES:
 	case ION_IOC_INV_CACHES:
 	case ION_IOC_CLEAN_INV_CACHES:
-		ret = ion_legacy_cache_ioctl(data.flush.handle,
+		ret = ion_legacy_cache_ioctl(filp, data.flush.handle,
 					     data.flush.fd,
 					     data.flush.offset,
 					     data.flush.length, cmd);

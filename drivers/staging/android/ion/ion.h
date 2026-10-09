@@ -118,6 +118,7 @@ struct ion_vma_list {
  * @flags:		buffer specific flags
  * @private_flags:	internal buffer specific flags
  * @size:		size of the buffer
+ * @alignment:		requested legacy allocation alignment
  * @priv_virt:		private data to the buffer representable as
  *			a void *
  * @lock:		protects the buffers cnt fields
@@ -136,6 +137,7 @@ struct ion_buffer {
 	unsigned long flags;
 	unsigned long private_flags;
 	size_t size;
+	size_t alignment;
 	void *priv_virt;
 	/* Protect ion buffer */
 	struct mutex lock;
@@ -301,6 +303,9 @@ int ion_heap_buffer_zero(struct ion_buffer *buffer);
 int ion_heap_pages_zero(struct page *page, size_t size, pgprot_t pgprot);
 
 int ion_alloc_fd(size_t len, unsigned int heap_id_mask, unsigned int flags);
+struct dma_buf *ion_alloc_dmabuf_aligned(size_t len, size_t align,
+					 unsigned int heap_id_mask,
+					 unsigned int flags);
 
 /**
  * ion_heap_init_shrinker
