@@ -25,6 +25,8 @@
 /*Add by Zhengrong.Zhang@Camera 20160630 for flash*/
 #include <linux/proc_fs.h>
 struct msm_flash_ctrl_t *vendor_flash_ctrl = NULL;
+/* Protected by msm_flash_mutex, shared with the V4L2 flash interface. */
+static bool flash_proc_mode_valid = true;
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 
@@ -816,6 +818,9 @@ static int32_t msm_flash_config(struct msm_flash_ctrl_t *flash_ctrl,
 		(struct msm_flash_cfg_data_t *) argp;
 
 	mutex_lock(flash_ctrl->flash_mutex);
+	/* An ioctl may change hardware before a later step fails. */
+	if (flash_ctrl == vendor_flash_ctrl)
+		flash_proc_mode_valid = false;
 
 	CDBG("Enter %s type %d\n", __func__, flash_data->cfg_type);
 
@@ -873,14 +878,13 @@ static int32_t msm_flash_config(struct msm_flash_ctrl_t *flash_ctrl,
 		break;
 	}
 
-	mutex_unlock(flash_ctrl->flash_mutex);
-
-	rc = msm_flash_prepare(flash_ctrl);
-	if (rc < 0) {
-		pr_err("%s:%d Enable/Disable Regulator failed ret = %d\n",
-			__func__, __LINE__, rc);
-		return rc;
+	if (!rc) {
+		rc = msm_flash_prepare(flash_ctrl);
+		if (rc < 0)
+			pr_err("%s:%d Enable/Disable Regulator failed ret = %d\n",
+				__func__, __LINE__, rc);
 	}
+	mutex_unlock(flash_ctrl->flash_mutex);
 
 	CDBG("Exit %s type %d\n", __func__, flash_data->cfg_type);
 
@@ -954,8 +958,16 @@ static long msm_flash_subdev_ioctl(struct v4l2_subdev *sd,
 		if (!fctrl->func_tbl) {
 			pr_err("fctrl->func_tbl NULL\n");
 		} else {
-			fctrl->func_tbl->camera_flash_release(fctrl);
-			return msm_flash_prepare(fctrl);
+			int32_t rc;
+
+			mutex_lock(fctrl->flash_mutex);
+			if (fctrl == vendor_flash_ctrl)
+				flash_proc_mode_valid = false;
+			rc = fctrl->func_tbl->camera_flash_release(fctrl);
+			if (!rc)
+				rc = msm_flash_prepare(fctrl);
+			mutex_unlock(fctrl->flash_mutex);
+			return rc;
 		}
 		return -EINVAL;
 	case VIDIOC_MSM_FLASH_QUERY_DATA:
@@ -1450,7 +1462,7 @@ static ssize_t flash_on_off(void)
     /* Add by Liubin for pmic flash at 20160819 */
     memset(&flash_data, 0, sizeof(flash_data));
 
-    if(pre_flash_mode == flash_mode)
+    if(pre_flash_mode == flash_mode && flash_proc_mode_valid)
         return 0;
 
 /*Add by Jindian.Guan@Camera 20170426 not use flashlight when use camera*/
@@ -1463,6 +1475,7 @@ static ssize_t flash_on_off(void)
         return 0;
 
     pre_flash_mode = flash_mode;
+    flash_proc_mode_valid = false;
 
     if (strcmp(vendor_flash_ctrl->flash_name, "lm3642") == 0) {
         vendor_flash_ctrl->flash_i2c_client.cci_client->sid = 0xc6 >> 1;
@@ -1576,7 +1589,7 @@ static ssize_t flash_on_off(void)
             case 0:
                 flash_data.flash_current[0] = 0;
                 flash_data.flash_current[1] = 0;
-                vendor_flash_ctrl->func_tbl->camera_flash_off(vendor_flash_ctrl, &flash_data);
+                rc = vendor_flash_ctrl->func_tbl->camera_flash_off(vendor_flash_ctrl, &flash_data);
                 break;
             case 1:
                 if (vendor_flash_ctrl->flash_num_sources >= 2) {
@@ -1586,17 +1599,17 @@ static ssize_t flash_on_off(void)
                     flash_data.flash_current[0] = 100; /*100mA*/
                     flash_data.flash_current[1] = 100; /*100mA*/
                 }
-                vendor_flash_ctrl->func_tbl->camera_flash_low(vendor_flash_ctrl, &flash_data);
+                rc = vendor_flash_ctrl->func_tbl->camera_flash_low(vendor_flash_ctrl, &flash_data);
                 break;
             case 2:
                 flash_data.flash_current[0] = 1000; /*1A*/
                 flash_data.flash_current[1] = 1000; /*1A*/
-                vendor_flash_ctrl->func_tbl->camera_flash_high(vendor_flash_ctrl, &flash_data);
+                rc = vendor_flash_ctrl->func_tbl->camera_flash_high(vendor_flash_ctrl, &flash_data);
                 break;
             case 3:
                 flash_data.flash_current[0] = 50; /*50mA*/
                 flash_data.flash_current[1] = 50; /*50mA*/
-                vendor_flash_ctrl->func_tbl->camera_flash_low(vendor_flash_ctrl, &flash_data);
+                rc = vendor_flash_ctrl->func_tbl->camera_flash_low(vendor_flash_ctrl, &flash_data);
                 break;
             default:
                 break;
@@ -1604,7 +1617,9 @@ static ssize_t flash_on_off(void)
     }
     /* Add by LiuBin for flash proc node at 20160819 end */
 
-    return rc;;
+    if (!rc)
+        flash_proc_mode_valid = true;
+    return rc;
 }
 
 static ssize_t flash_proc_write(struct file *filp, const char __user *buff,
