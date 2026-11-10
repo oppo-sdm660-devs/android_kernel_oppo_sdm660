@@ -444,11 +444,17 @@ static long msm_isp_v4l2_fops_ioctl(struct file *file, unsigned int cmd,
 
 static void isp_vma_open(struct vm_area_struct *vma)
 {
+	struct vfe_device *vfe_dev = vma->vm_private_data;
+
+	atomic_inc(&vfe_dev->isp_state_mappings);
 	pr_debug("%s: open called\n", __func__);
 }
 
 static void isp_vma_close(struct vm_area_struct *vma)
 {
+	struct vfe_device *vfe_dev = vma->vm_private_data;
+
+	atomic_dec(&vfe_dev->isp_state_mappings);
 	pr_debug("%s: close called\n", __func__);
 }
 
@@ -749,6 +755,7 @@ int vfe_hw_probe(struct platform_device *pdev)
 	msm_isp_enable_debugfs(vfe_dev, msm_isp_bw_request_history);
 	vfe_dev->buf_mgr->init_done = 1;
 	vfe_dev->vfe_open_cnt = 0;
+	atomic_set(&vfe_dev->isp_state_mappings, 0);
 	/*Allocate a page in kernel and map it to camera user process*/
 	vfe_dev->isp_page = (struct isp_kstate *)get_zeroed_page(GFP_KERNEL);
 	if (vfe_dev->isp_page == NULL) {

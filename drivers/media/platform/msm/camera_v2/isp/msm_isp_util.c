@@ -2535,6 +2535,10 @@ int msm_isp_close_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	}
 	vfe_dev->hw_info->vfe_ops.core_ops.release_hw(vfe_dev);
 	/* after regular hw stop, reduce open cnt */
+	vfe_dev->isp_page->kernel_sofid = 0;
+	vfe_dev->isp_page->drop_reconfig = 0;
+	vfe_dev->isp_page->dual_cam_drop_detected = 0;
+	vfe_dev->isp_page->dual_cam_drop = 0;
 	vfe_dev->vfe_open_cnt--;
 	vfe_dev->buf_mgr->ops->buf_mgr_deinit(vfe_dev->buf_mgr);
 	if (vfe_dev->vt_enable) {

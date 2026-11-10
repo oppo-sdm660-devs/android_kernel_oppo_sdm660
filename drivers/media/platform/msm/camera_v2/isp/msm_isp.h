@@ -869,6 +869,7 @@ struct vfe_device {
 	/* total bandwidth per vfe */
 	uint64_t total_bandwidth;
 	struct isp_kstate *isp_page;
+	atomic_t isp_state_mappings;
 
 	/* Dual VFE IRQ CAMSS Info*/
 	void __iomem *camss_base;

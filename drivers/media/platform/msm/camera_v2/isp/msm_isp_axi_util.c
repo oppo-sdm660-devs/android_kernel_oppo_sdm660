@@ -3698,6 +3698,7 @@ static int msm_isp_request_frame(struct vfe_device *vfe_dev,
 	uint32_t wm_mask = 0;
 	int vfe_idx;
 	uint32_t pingpong_bit = 0;
+	bool can_defer;
 
 	if (!vfe_dev || !stream_info) {
 		pr_err("%s %d failed: vfe_dev %pK stream_info %pK\n", __func__,
@@ -3722,11 +3723,13 @@ static int msm_isp_request_frame(struct vfe_device *vfe_dev,
 	}
 
 	frame_src = SRC_TO_INTF(stream_info->stream_src);
+	/* Legacy MCT never maps kstate and cannot acknowledge a deferred frame. */
+	can_defer = atomic_read(&vfe_dev->isp_state_mappings) > 0;
 	pingpong_status =
 		vfe_dev->hw_info->vfe_ops.axi_ops.get_pingpong_status(vfe_dev);
 
 	/* As MCT is still processing it, need to drop the additional requests*/
-	if (vfe_dev->isp_page->drop_reconfig &&
+	if (can_defer && vfe_dev->isp_page->drop_reconfig &&
 		frame_src == VFE_PIX_0) {
 		pr_err("%s: MCT has not yet delayed %d drop request %d\n",
 			__func__, vfe_dev->isp_page->drop_reconfig, frame_id);
@@ -3749,6 +3752,8 @@ static int msm_isp_request_frame(struct vfe_device *vfe_dev,
 		) {
 		pr_debug("%s:%d invalid time to request frame %d try drop_reconfig\n",
 			__func__, __LINE__, frame_id);
+		if (!can_defer)
+			goto error;
 		vfe_dev->isp_page->drop_reconfig = 1;
 		return 0;
 	} else if ((vfe_dev->axi_data.src_info[frame_src].active) &&
@@ -3757,6 +3762,8 @@ static int msm_isp_request_frame(struct vfe_device *vfe_dev,
 			(frame_id == vfe_dev->irq_sof_id)) &&
 			(stream_info->undelivered_request_cnt <=
 				MAX_BUFFERS_IN_HW)) {
+		if (!can_defer)
+			goto error;
 		vfe_dev->isp_page->drop_reconfig = 1;
 		pr_debug("%s: vfe_%d request_frame %d cur frame id %d pix %d try drop_reconfig\n",
 			__func__, vfe_dev->pdev->id, frame_id,
@@ -3794,6 +3801,8 @@ static int msm_isp_request_frame(struct vfe_device *vfe_dev,
 			__func__, __LINE__, vfe_dev->pdev->id, frame_id,
 			stream_info->activated_framedrop_period,
 			stream_info->stream_id);
+		if (!can_defer)
+			goto error;
 		vfe_dev->isp_page->drop_reconfig = 1;
 		return 0;
 	}
