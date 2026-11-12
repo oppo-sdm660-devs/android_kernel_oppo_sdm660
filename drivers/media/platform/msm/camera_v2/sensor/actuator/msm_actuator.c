@@ -422,7 +422,7 @@ static int32_t msm_actuator_write_firmware_sunny(struct msm_actuator_ctrl_t *a_c
 		}
 
 		if (check_reg_setting.reg_setting[i].delay > 0)
-			msleep(reg_setting.reg_setting[i].delay);
+			msleep(check_reg_setting.reg_setting[i].delay);
 	}
 
 	do{
@@ -457,7 +457,7 @@ static int32_t msm_actuator_write_firmware_sunny(struct msm_actuator_ctrl_t *a_c
 		if (need_update) {
 			if (retry >= 3) {
 				pr_err("%s retry more than 3 times,write firmware fail!!!\n",__func__);
-				return 0;
+				return -EIO;
 			}
 			for (i = 0; i < reg_setting.size; i++) {
 				rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_write(
@@ -483,7 +483,7 @@ static int32_t msm_actuator_write_firmware_sunny(struct msm_actuator_ctrl_t *a_c
 			pr_err("%s no need to update",__func__);
 			break;
 		}
-	}while (retry < 3);
+	}while (retry <= 3);
 	CDBG("Exit\n");
 	return rc;
 }
